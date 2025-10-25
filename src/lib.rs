@@ -2,6 +2,7 @@
 ///
 /// This library provides tools for decoding and monitoring Solana DEX pools.
 pub mod config;
+pub mod csv_writer;
 pub mod dex;
 pub mod error;
 pub mod healthcheck;
@@ -13,6 +14,11 @@ pub mod price_fetcher;
 pub mod websocket;
 
 // Re-export commonly used types
+pub use config::{
+    AppConfig, PersistenceConfig, PoolConfig, PriceFetcherConfig, RateLimitConfig, RetryConfig,
+    RuntimeConfig,
+};
+pub use csv_writer::{CsvWriter, CsvWriterConfig};
 pub use dex::{create_decoder, DecoderRegistry, DecoderStats, DexDecoder};
 pub use error::AppError;
 pub use healthcheck::{AppState, HealthResponse, ReadinessResponse};
