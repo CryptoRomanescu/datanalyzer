@@ -1040,6 +1040,7 @@ dependencies = [
  "serde_json",
  "solana-client",
  "solana-sdk",
+ "spl-token",
  "thiserror",
  "tokio",
  "toml 0.8.23",

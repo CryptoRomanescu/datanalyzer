@@ -336,6 +336,24 @@ impl RaydiumDecoder {
         let amm_info = Self::deserialize_amm_info(account_data)?;
         Ok(VaultInfo::from_amm_info(amm_info))
     }
+
+    /// Decode reserve information from account data.
+    ///
+    /// This method returns ReserveInfo which indicates that vault accounts
+    /// need to be fetched to get actual reserves.
+    ///
+    /// # Arguments
+    ///
+    /// * `account_data` - Raw account data bytes from Solana
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(ReserveInfo)` - Reserve information (RequiresVaults variant)
+    /// * `Err(AppError)` - If data is invalid
+    pub fn decode_reserve_info(&self, account_data: &[u8]) -> Result<crate::orchestrator::ReserveInfo, AppError> {
+        let vault_info = self.get_vault_info(account_data)?;
+        Ok(crate::orchestrator::ReserveInfo::RequiresVaults(vault_info))
+    }
 }
 
 impl DexDecoder for RaydiumDecoder {

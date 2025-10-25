@@ -163,6 +163,26 @@ impl DexDecoder for PumpFunDecoder {
     }
 }
 
+impl PumpFunDecoder {
+    /// Decode reserve information from account data.
+    ///
+    /// This method returns ReserveInfo which contains direct reserves
+    /// since Pump.fun stores reserves directly in the account.
+    ///
+    /// # Arguments
+    ///
+    /// * `account_data` - Raw account data bytes from Solana
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(ReserveInfo)` - Reserve information (Direct variant)
+    /// * `Err(AppError)` - If data is invalid
+    pub fn decode_reserve_info(&self, account_data: &[u8]) -> Result<crate::orchestrator::ReserveInfo, AppError> {
+        let (base, quote) = self.decode_reserves(account_data)?;
+        Ok(crate::orchestrator::ReserveInfo::Direct { base, quote })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
