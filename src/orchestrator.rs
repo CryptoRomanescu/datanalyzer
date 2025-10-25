@@ -1,348 +1,307 @@
-/// Orchestrator module for async DEX operations.
-///
-/// This module provides async functionality for fetching reserves from DEX pools,
-/// particularly those that store reserves in separate vault accounts (like Raydium).
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use crate::dex::raydium::VaultInfo;
+use crate::config::PoolConfig;
+use crate::dex::{pumpfun::PumpFunDecoder, raydium::RaydiumDecoder, DexDecoder};
 use crate::error::AppError;
-use solana_client::rpc_client::RpcClient;
-use solana_sdk::program_pack::Pack;
-use spl_token::state::Account as TokenAccount;
+use crate::liquidity::calculate_liquidity_usd;
+use crate::models::{DexType, PoolSnapshot};
+use crate::price_fetcher::PriceFetcher;
+use crate::csv_writer::CsvWriter;
 
-/// Result of decoding pool reserves.
-///
-/// Different DEXs store reserves differently:
-/// - Some store reserves directly in the pool account (Pump.fun)
-/// - Some store references to vault accounts that hold reserves (Raydium)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReserveInfo {
-    /// Reserves are stored directly in the account data.
-    /// Returns (base_reserve, quote_reserve).
-    Direct { base: u64, quote: u64 },
+use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_sdk::pubkey::Pubkey;
+use spl_token::state::Account as SplTokenAccount;
 
-    /// Reserves are stored in separate vault accounts.
-    /// Requires async RPC calls to fetch actual balances.
-    RequiresVaults(VaultInfo),
+use tokio::sync::{mpsc, Mutex};
+
+/// Zdarzenie do przetworzenia (dostarczane z WebSocket callback)
+#[derive(Debug, Clone)]
+pub struct PoolUpdate {
+    pub pool: Pubkey,
+    pub slot: u64,
+    pub account_data: Vec<u8>,
 }
 
-/// Async orchestrator for fetching DEX pool reserves.
-///
-/// This orchestrator handles both direct reserve access (Pump.fun) and
-/// vault-based reserves (Raydium) through RPC calls.
-pub struct ReserveOrchestrator {
-    rpc_client: RpcClient,
+/// Wynikowe dane do zapisu (snapshot)
+#[derive(Debug)]
+struct SnapshotRecord {
+    pub snapshot: PoolSnapshot,
+    pub dex_type: DexType,
 }
 
-impl ReserveOrchestrator {
-    /// Create a new reserve orchestrator with an RPC client.
-    ///
-    /// # Arguments
-    ///
-    /// * `rpc_url` - The Solana RPC endpoint URL
-    ///
-    /// # Returns
-    ///
-    /// A new ReserveOrchestrator instance
-    pub fn new(rpc_url: String) -> Self {
+pub struct Orchestrator {
+    rpc: Arc<RpcClient>,
+    price_fetcher: Arc<PriceFetcher>,
+    out_dir: PathBuf,
+
+    // Metadane konfiguracji
+    pool_types: HashMap<Pubkey, DexType>,
+    pool_token_mints: HashMap<Pubkey, Pubkey>,
+
+    // Opcjonalne mapowanie mint -> CoinGecko ID
+    token_map: HashMap<Pubkey, String>,
+
+    // Writery CSV per-pool
+    writers: Arc<Mutex<HashMap<Pubkey, CsvWriter>>>,
+}
+
+impl Orchestrator {
+    pub fn new(
+        rpc_http_url: String,
+        price_fetcher: Arc<PriceFetcher>,
+        out_dir: impl AsRef<Path>,
+        pools: &[PoolConfig],
+        token_map: HashMap<Pubkey, String>,
+    ) -> Self {
+        let rpc = Arc::new(RpcClient::new(rpc_http_url));
+
+        let mut pool_types = HashMap::new();
+        let mut pool_token_mints = HashMap::new();
+        for p in pools {
+            pool_types.insert(*p.pool_address(), p.dex_type());
+            pool_token_mints.insert(*p.pool_address(), *p.token_mint());
+        }
+
         Self {
-            rpc_client: RpcClient::new(rpc_url),
+            rpc,
+            price_fetcher,
+            out_dir: out_dir.as_ref().to_path_buf(),
+            pool_types,
+            pool_token_mints,
+            token_map,
+            writers: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    /// Create a new reserve orchestrator with a custom RPC client.
-    ///
-    /// # Arguments
-    ///
-    /// * `rpc_client` - A configured RPC client
-    ///
-    /// # Returns
-    ///
-    /// A new ReserveOrchestrator instance
-    pub fn with_client(rpc_client: RpcClient) -> Self {
-        Self { rpc_client }
+    /// Uruchamia pętlę przetwarzania z pulą workerów i osobnym workerem zapisu CSV.
+    pub async fn run(
+        self: Arc<Self>,
+        mut rx: mpsc::Receiver<PoolUpdate>,
+        workers: usize,
+    ) -> Result<(), AppError> {
+        let (tx_snap, mut rx_snap) = mpsc::channel::<SnapshotRecord>(1024);
+
+        // Workerzy compute
+        for _ in 0..workers {
+            let me = Arc::clone(&self);
+            let mut rx_clone = rx.clone();
+            let tx_snap_clone = tx_snap.clone();
+
+            tokio::spawn(async move {
+                while let Some(update) = rx_clone.recv().await {
+                    if let Err(e) = me.handle_update(update, &tx_snap_clone).await {
+                        log::debug!("Compute error: {}", e);
+                    }
+                }
+            });
+        }
+        drop(tx_snap); // główny nadajnik niepotrzebny
+
+        // Worker zapisu CSV (single-threaded, aby uniknąć konfliktów plików)
+        let me = Arc::clone(&self);
+        tokio::spawn(async move {
+            while let Some(rec) = rx_snap.recv().await {
+                if let Err(e) = me.write_snapshot(rec).await {
+                    log::error!("Write error: {}", e);
+                }
+            }
+        });
+
+        // Główny receiver — niech żyje aż do zamknięcia kanału przez wywołującego
+        while let Some(update) = rx.recv().await {
+            // Jeżeli brak workerów, przetwarzaj inline
+            if workers == 0 {
+                if let Err(e) = self.handle_update(update, &rx_snap).await {
+                    log::debug!("Inline compute error: {}", e);
+                }
+            } else {
+                // W workerach już czeka rx_clone
+            }
+        }
+
+        Ok(())
     }
 
-    /// Fetch vault balances from Raydium vault accounts.
-    ///
-    /// This method fetches the actual token balances from the vault accounts
-    /// referenced in the Raydium AmmInfo structure.
-    ///
-    /// # Arguments
-    ///
-    /// * `vault_info` - Vault information extracted from AmmInfo
-    ///
-    /// # Returns
-    ///
-    /// * `Ok((u64, u64))` - Tuple of (base_reserve, quote_reserve)
-    /// * `Err(AppError)` - If RPC call fails or vault parsing fails
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - RPC call fails (network error, account not found, etc.)
-    /// - Account data is not a valid SPL token account
-    /// - Account data is too small
-    pub fn fetch_vault_balances(&self, vault_info: &VaultInfo) -> Result<(u64, u64), AppError> {
-        // Fetch coin vault account
-        let coin_vault_account = self
-            .rpc_client
-            .get_account(&vault_info.coin_vault)
-            .map_err(|e| {
-                AppError::RpcError(format!("Failed to fetch coin vault account: {}", e))
-            })?;
+    async fn handle_update(
+        &self,
+        update: PoolUpdate,
+        tx_snap: &mpsc::Sender<SnapshotRecord>,
+    ) -> Result<(), AppError> {
+        let dex = self
+            .pool_types
+            .get(&update.pool)
+            .ok_or_else(|| AppError::DecodingError(format!("Unknown pool type for {}", update.pool)))?;
 
-        // Fetch PC vault account
-        let pc_vault_account = self
-            .rpc_client
-            .get_account(&vault_info.pc_vault)
-            .map_err(|e| AppError::RpcError(format!("Failed to fetch PC vault account: {}", e)))?;
+        match dex {
+            DexType::PumpFun => {
+                let decoder = PumpFunDecoder;
+                decoder.validate_account(&update.account_data)?;
+                let (reserve_base, reserve_quote) = decoder.decode_reserves(&update.account_data)?;
 
-        // Parse coin vault as SPL token account
-        let coin_token_account = TokenAccount::unpack_from_slice(&coin_vault_account.data).map_err(|e| {
-            AppError::DecodingError(format!("Failed to parse coin vault as token account: {}", e))
-        })?;
+                let price = if reserve_base > 0 {
+                    reserve_quote as f64 / reserve_base as f64
+                } else {
+                    0.0
+                };
 
-        // Parse PC vault as SPL token account
-        let pc_token_account = TokenAccount::unpack_from_slice(&pc_vault_account.data).map_err(|e| {
-            AppError::DecodingError(format!("Failed to parse PC vault as token account: {}", e))
-        })?;
+                let snapshot = PoolSnapshot::new(
+                    update.pool.to_string(),
+                    self.pool_token_mints
+                        .get(&update.pool)
+                        .cloned()
+                        .unwrap_or_default()
+                        .to_string(),
+                    *dex,
+                    reserve_base,
+                    reserve_quote,
+                    chrono::Utc::now().timestamp(),
+                    price,
+                )?;
 
-        // Verify mint addresses match
-        if coin_token_account.mint != vault_info.coin_mint {
-            return Err(AppError::DecodingError(format!(
-                "Coin vault mint mismatch: expected {}, got {}",
-                vault_info.coin_mint, coin_token_account.mint
-            )));
+                tx_snap
+                    .send(SnapshotRecord {
+                        snapshot,
+                        dex_type: *dex,
+                    })
+                    .await
+                    .map_err(|e| AppError::CsvError(format!("Send snapshot error: {}", e)))?;
+            }
+
+            DexType::Raydium => {
+                // 1) Wyciągnij vaulty z AmmInfo
+                let decoder = RaydiumDecoder;
+                decoder.validate_account(&update.account_data)?;
+                let vault_info = decoder.get_vault_info(&update.account_data)?;
+
+                // 2) Pobierz konta SPL vaultów przez HTTP RPC
+                let coin_data = self
+                    .rpc
+                    .get_account_data(&vault_info.coin_vault)
+                    .await
+                    .map_err(|e| AppError::RpcError(format!("get_account_data coin_vault: {}", e)))?;
+                let pc_data = self
+                    .rpc
+                    .get_account_data(&vault_info.pc_vault)
+                    .await
+                    .map_err(|e| AppError::RpcError(format!("get_account_data pc_vault: {}", e)))?;
+
+                // 3) Parsuj SPL Token Account i wydobądź amount
+                let coin_acc = SplTokenAccount::unpack(&coin_data)
+                    .map_err(|e| AppError::DecodingError(format!("SPL unpack coin: {}", e)))?;
+                let pc_acc = SplTokenAccount::unpack(&pc_data)
+                    .map_err(|e| AppError::DecodingError(format!("SPL unpack pc: {}", e)))?;
+
+                let reserve_base = coin_acc.amount; // Raydium: coin_vault = base
+                let reserve_quote = pc_acc.amount; // pc_vault = quote (często SOL lub USDC)
+
+                let price = if reserve_base > 0 {
+                    reserve_quote as f64 / reserve_base as f64
+                } else {
+                    0.0
+                };
+
+                // Opcjonalnie: liquidity USD (wymaga mapowania tokenów)
+                // Używamy "solana" dla SOL quote, a base wg token_map (jeśli istnieje)
+                let token_mint = self
+                    .pool_token_mints
+                    .get(&update.pool)
+                    .cloned()
+                    .unwrap_or_default();
+
+                let mut snapshot = PoolSnapshot::new(
+                    update.pool.to_string(),
+                    token_mint.to_string(),
+                    *dex,
+                    reserve_base,
+                    reserve_quote,
+                    chrono::Utc::now().timestamp(),
+                    price,
+                )?;
+
+                // Jeśli masz mapowanie mint->coingecko id, możesz policzyć liquidity
+                if let Some(token_id) = self.token_map.get(&token_mint) {
+                    // Zakładamy PC=SOL i bierzemy "solana" jako quote
+                    let prices = self
+                        .price_fetcher
+                        .fetch_prices(&vec!["solana".to_string(), token_id.clone()])
+                        .await
+                        .unwrap_or_default();
+
+                    let sol_price = prices.get("solana").copied().unwrap_or(0.0);
+                    let token_price = prices.get(token_id).copied().unwrap_or(0.0);
+
+                    if sol_price > 0.0 || token_price > 0.0 {
+                        // Decimals: SOL=9, token przyjmij 9 jako domyślne (lub dołóż provider decimali)
+                        let token_decimals = 9u8;
+                        if let Ok(liq) = calculate_liquidity_usd(
+                            reserve_quote,
+                            reserve_base,
+                            sol_price,
+                            token_price,
+                            token_decimals,
+                        ) {
+                            snapshot = PoolSnapshot::with_liquidity(
+                                snapshot.pool_address.clone(),
+                                snapshot.token_mint.clone(),
+                                snapshot.dex_type,
+                                snapshot.reserve_base,
+                                snapshot.reserve_quote,
+                                snapshot.timestamp,
+                                snapshot.price,
+                                liq,
+                            )?;
+                        }
+                    }
+                }
+
+                tx_snap
+                    .send(SnapshotRecord {
+                        snapshot,
+                        dex_type: *dex,
+                    })
+                    .await
+                    .map_err(|e| AppError::CsvError(format!("Send snapshot error: {}", e)))?;
+            }
         }
 
-        if pc_token_account.mint != vault_info.pc_mint {
-            return Err(AppError::DecodingError(format!(
-                "PC vault mint mismatch: expected {}, got {}",
-                vault_info.pc_mint, pc_token_account.mint
-            )));
-        }
-
-        Ok((coin_token_account.amount, pc_token_account.amount))
+        Ok(())
     }
 
-    /// Resolve reserve info into actual reserve amounts.
-    ///
-    /// This method handles both direct reserves and vault-based reserves,
-    /// fetching from RPC when necessary.
-    ///
-    /// # Arguments
-    ///
-    /// * `reserve_info` - Reserve information from decoder
-    ///
-    /// # Returns
-    ///
-    /// * `Ok((u64, u64))` - Tuple of (base_reserve, quote_reserve)
-    /// * `Err(AppError)` - If RPC call fails or parsing fails
-    pub fn resolve_reserves(&self, reserve_info: &ReserveInfo) -> Result<(u64, u64), AppError> {
-        match reserve_info {
-            ReserveInfo::Direct { base, quote } => Ok((*base, *quote)),
-            ReserveInfo::RequiresVaults(vault_info) => self.fetch_vault_balances(vault_info),
+    async fn writer_for(&self, pool: &Pubkey, dex: DexType) -> Result<CsvWriter, AppError> {
+        let mut writers = self.writers.lock().await;
+        if let Some(w) = writers.get(pool) {
+            // Clippy wymaga klonowalnego writera; prostsze: przechowuj nowy za każdym razem
+            // Tu implementujemy lazy open per pool.
         }
+
+        let filename = format!("{}_{}.csv", dex.to_string().to_lowercase(), &pool.to_string()[..8]);
+        let path = self.out_dir.join(filename);
+        let mut writer = CsvWriter::new(&path)?;
+
+        // Nagłówek tylko raz: CsvWriter.new ustawia brak nagłówków — tu dopisz raz nagłówek
+        writer.write_header_if_needed()?;
+
+        writers.insert(*pool, writer);
+        // Niestety nie zwrócimy referencji — otwórzmy świeży writer do zapisu (append)
+        CsvWriter::new(&path)
+    }
+
+    async fn write_snapshot(&self, rec: SnapshotRecord) -> Result<(), AppError> {
+        let pool_pk = Pubkey::from_str(&rec.snapshot.pool_address)
+            .map_err(|e| AppError::DecodingError(format!("Invalid pool pubkey: {}", e)))?;
+
+        let mut writer = self.writer_for(&pool_pk, rec.dex_type).await?;
+        writer.write_snapshot(&rec.snapshot)?;
+        writer.flush()?;
+        Ok(())
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use solana_sdk::pubkey::Pubkey;
-
-    #[test]
-    fn test_reserve_info_direct() {
-        let reserve_info = ReserveInfo::Direct {
-            base: 1000,
-            quote: 2000,
-        };
-
-        match reserve_info {
-            ReserveInfo::Direct { base, quote } => {
-                assert_eq!(base, 1000);
-                assert_eq!(quote, 2000);
-            }
-            _ => panic!("Expected Direct variant"),
-        }
-    }
-
-    #[test]
-    fn test_reserve_info_requires_vaults() {
-        let vault_info = VaultInfo {
-            coin_vault: Pubkey::new_unique(),
-            pc_vault: Pubkey::new_unique(),
-            coin_mint: Pubkey::new_unique(),
-            pc_mint: Pubkey::new_unique(),
-        };
-
-        let reserve_info = ReserveInfo::RequiresVaults(vault_info);
-
-        match reserve_info {
-            ReserveInfo::RequiresVaults(info) => {
-                assert_eq!(info.coin_vault, vault_info.coin_vault);
-                assert_eq!(info.pc_vault, vault_info.pc_vault);
-            }
-            _ => panic!("Expected RequiresVaults variant"),
-        }
-    }
-
-    #[test]
-    fn test_orchestrator_new() {
-        let _orchestrator = ReserveOrchestrator::new("https://api.mainnet-beta.solana.com".to_string());
-        // Just verify it constructs without panic
-        assert!(true);
-    }
-
-    #[test]
-    fn test_orchestrator_resolve_direct() {
-        let orchestrator = ReserveOrchestrator::new("https://api.mainnet-beta.solana.com".to_string());
-        
-        let reserve_info = ReserveInfo::Direct {
-            base: 5000,
-            quote: 10000,
-        };
-
-        let result = orchestrator.resolve_reserves(&reserve_info);
-        assert!(result.is_ok());
-        let (base, quote) = result.unwrap();
-        assert_eq!(base, 5000);
-        assert_eq!(quote, 10000);
-    }
-
-    #[test]
-    fn test_reserve_info_clone() {
-        let reserve_info = ReserveInfo::Direct {
-            base: 1000,
-            quote: 2000,
-        };
-        let cloned = reserve_info.clone();
-        assert_eq!(reserve_info, cloned);
-    }
-
-    #[test]
-    fn test_vault_info_clone() {
-        let vault_info = VaultInfo {
-            coin_vault: Pubkey::new_unique(),
-            pc_vault: Pubkey::new_unique(),
-            coin_mint: Pubkey::new_unique(),
-            pc_mint: Pubkey::new_unique(),
-        };
-        
-        let reserve_info = ReserveInfo::RequiresVaults(vault_info);
-        let cloned = reserve_info.clone();
-        assert_eq!(reserve_info, cloned);
-    }
-}
-
-// Integration tests for full end-to-end orchestrator functionality
-#[cfg(test)]
-mod integration_tests {
-    use super::*;
-    use crate::dex::raydium::{AmmInfo, RaydiumDecoder};
-    use crate::dex::pumpfun::PumpFunDecoder;
-    use solana_sdk::pubkey::Pubkey;
-
-    /// Test end-to-end flow: Raydium decoder → ReserveInfo
-    #[test]
-    fn test_raydium_decoder_to_reserve_info() {
-        let decoder = RaydiumDecoder;
-        
-        // Create a test AmmInfo structure
-        let mut amm_info = AmmInfo::default();
-        amm_info.status = 1; // Initialized
-        amm_info.coin_vault = Pubkey::new_unique();
-        amm_info.pc_vault = Pubkey::new_unique();
-        amm_info.coin_vault_mint = Pubkey::new_unique();
-        amm_info.pc_vault_mint = Pubkey::new_unique();
-        amm_info.lp_mint = Pubkey::new_unique();
-        amm_info.open_orders = Pubkey::new_unique();
-        amm_info.market = Pubkey::new_unique();
-        amm_info.market_program = Pubkey::new_unique();
-        amm_info.target_orders = Pubkey::new_unique();
-        amm_info.amm_owner = Pubkey::new_unique();
-
-        // Convert to bytes
-        let mut data = vec![0u8; 752];
-        let amm_bytes = bytemuck::bytes_of(&amm_info);
-        data.copy_from_slice(amm_bytes);
-
-        // Decode to ReserveInfo
-        let reserve_info = decoder.decode_reserve_info(&data).unwrap();
-
-        // Verify we get RequiresVaults
-        match reserve_info {
-            ReserveInfo::RequiresVaults(vault_info) => {
-                assert_eq!(vault_info.coin_vault, amm_info.coin_vault);
-                assert_eq!(vault_info.pc_vault, amm_info.pc_vault);
-                assert_eq!(vault_info.coin_mint, amm_info.coin_vault_mint);
-                assert_eq!(vault_info.pc_mint, amm_info.pc_vault_mint);
-            }
-            _ => panic!("Expected RequiresVaults for Raydium"),
-        }
-    }
-
-    /// Test end-to-end flow: PumpFun decoder → ReserveInfo
-    #[test]
-    fn test_pumpfun_decoder_to_reserve_info() {
-        let decoder = PumpFunDecoder;
-        
-        // Create test PumpFun account data
-        let mut data = vec![0u8; 256];
-        let token_reserve = 1000000u64;
-        let sol_reserve = 500000u64;
-        
-        // Set token reserve at offset 0x18
-        data[0x18..0x20].copy_from_slice(&token_reserve.to_le_bytes());
-        // Set SOL reserve at offset 0x20
-        data[0x20..0x28].copy_from_slice(&sol_reserve.to_le_bytes());
-
-        // Decode to ReserveInfo
-        let reserve_info = decoder.decode_reserve_info(&data).unwrap();
-
-        // Verify we get Direct
-        match reserve_info {
-            ReserveInfo::Direct { base, quote } => {
-                assert_eq!(base, token_reserve);
-                assert_eq!(quote, sol_reserve);
-            }
-            _ => panic!("Expected Direct for PumpFun"),
-        }
-    }
-
-    /// Test orchestrator can resolve both types
-    #[test]
-    fn test_orchestrator_handles_both_types() {
-        let orchestrator = ReserveOrchestrator::new("https://api.mainnet-beta.solana.com".to_string());
-
-        // Test Direct reserves
-        let direct = ReserveInfo::Direct {
-            base: 1000,
-            quote: 2000,
-        };
-        let (base, quote) = orchestrator.resolve_reserves(&direct).unwrap();
-        assert_eq!(base, 1000);
-        assert_eq!(quote, 2000);
-
-        // Note: Testing RequiresVaults would require a real or mock RPC server
-        // For now, we verify the structure is correct
-        let vault_info = VaultInfo {
-            coin_vault: Pubkey::new_unique(),
-            pc_vault: Pubkey::new_unique(),
-            coin_mint: Pubkey::new_unique(),
-            pc_mint: Pubkey::new_unique(),
-        };
-        let vaults = ReserveInfo::RequiresVaults(vault_info);
-        
-        // This will fail with RPC error in test environment, but that's expected
-        // The important thing is the API accepts it
-        let result = orchestrator.resolve_reserves(&vaults);
-        assert!(result.is_err()); // Expected to fail without real RPC
-        
-        // Verify error is RPC-related, not a logic error
-        if let Err(e) = result {
-            let err_msg = e.to_string();
-            assert!(err_msg.contains("RPC") || err_msg.contains("Failed to fetch"));
-        }
+impl std::str::FromStr for Pubkey {
+    type Err = solana_sdk::pubkey::ParsePubkeyError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Pubkey::from_str(s)
     }
 }
