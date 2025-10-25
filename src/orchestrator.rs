@@ -3,16 +3,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::config::PoolConfig;
+use crate::csv_writer::{CsvWriter, CsvWriterConfig};
 use crate::dex::{pumpfun::PumpFunDecoder, raydium::RaydiumDecoder, DexDecoder};
 use crate::error::AppError;
 use crate::liquidity::calculate_liquidity_usd;
 use crate::models::{DexType, PoolSnapshot};
 use crate::price_fetcher::PriceFetcher;
-use crate::csv_writer::CsvWriter;
 
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use spl_token::state::Account as SplTokenAccount;
+use solana_program::program_pack::Pack;
 
 use tokio::sync::{mpsc, Mutex};
 
@@ -35,6 +36,7 @@ pub struct Orchestrator {
     rpc: Arc<RpcClient>,
     price_fetcher: Arc<PriceFetcher>,
     out_dir: PathBuf,
+    csv_config: CsvWriterConfig,
 
     // Metadane konfiguracji
     pool_types: HashMap<Pubkey, DexType>,
@@ -54,6 +56,7 @@ impl Orchestrator {
         out_dir: impl AsRef<Path>,
         pools: &[PoolConfig],
         token_map: HashMap<Pubkey, String>,
+        csv_config: CsvWriterConfig,
     ) -> Self {
         let rpc = Arc::new(RpcClient::new(rpc_http_url));
 
@@ -68,6 +71,7 @@ impl Orchestrator {
             rpc,
             price_fetcher,
             out_dir: out_dir.as_ref().to_path_buf(),
+            csv_config,
             pool_types,
             pool_token_mints,
             token_map,
@@ -83,22 +87,6 @@ impl Orchestrator {
     ) -> Result<(), AppError> {
         let (tx_snap, mut rx_snap) = mpsc::channel::<SnapshotRecord>(1024);
 
-        // Workerzy compute
-        for _ in 0..workers {
-            let me = Arc::clone(&self);
-            let mut rx_clone = rx.clone();
-            let tx_snap_clone = tx_snap.clone();
-
-            tokio::spawn(async move {
-                while let Some(update) = rx_clone.recv().await {
-                    if let Err(e) = me.handle_update(update, &tx_snap_clone).await {
-                        log::debug!("Compute error: {}", e);
-                    }
-                }
-            });
-        }
-        drop(tx_snap); // główny nadajnik niepotrzebny
-
         // Worker zapisu CSV (single-threaded, aby uniknąć konfliktów plików)
         let me = Arc::clone(&self);
         tokio::spawn(async move {
@@ -109,15 +97,10 @@ impl Orchestrator {
             }
         });
 
-        // Główny receiver — niech żyje aż do zamknięcia kanału przez wywołującego
+        // Główny receiver — przetwarzaj aktualizacje
         while let Some(update) = rx.recv().await {
-            // Jeżeli brak workerów, przetwarzaj inline
-            if workers == 0 {
-                if let Err(e) = self.handle_update(update, &rx_snap).await {
-                    log::debug!("Inline compute error: {}", e);
-                }
-            } else {
-                // W workerach już czeka rx_clone
+            if let Err(e) = self.handle_update(update, &tx_snap).await {
+                log::debug!("Compute error: {}", e);
             }
         }
 
@@ -269,39 +252,40 @@ impl Orchestrator {
         Ok(())
     }
 
-    async fn writer_for(&self, pool: &Pubkey, dex: DexType) -> Result<CsvWriter, AppError> {
-        let mut writers = self.writers.lock().await;
-        if let Some(w) = writers.get(pool) {
-            // Clippy wymaga klonowalnego writera; prostsze: przechowuj nowy za każdym razem
-            // Tu implementujemy lazy open per pool.
-        }
-
-        let filename = format!("{}_{}.csv", dex.to_string().to_lowercase(), &pool.to_string()[..8]);
-        let path = self.out_dir.join(filename);
-        let mut writer = CsvWriter::new(&path)?;
-
-        // Nagłówek tylko raz: CsvWriter.new ustawia brak nagłówków — tu dopisz raz nagłówek
-        writer.write_header_if_needed()?;
-
-        writers.insert(*pool, writer);
-        // Niestety nie zwrócimy referencji — otwórzmy świeży writer do zapisu (append)
-        CsvWriter::new(&path)
-    }
-
     async fn write_snapshot(&self, rec: SnapshotRecord) -> Result<(), AppError> {
-        let pool_pk = Pubkey::from_str(&rec.snapshot.pool_address)
+        let pool_pk = rec.snapshot.pool_address.parse::<Pubkey>()
             .map_err(|e| AppError::DecodingError(format!("Invalid pool pubkey: {}", e)))?;
 
-        let mut writer = self.writer_for(&pool_pk, rec.dex_type).await?;
-        writer.write_snapshot(&rec.snapshot)?;
-        writer.flush()?;
+        let mut writers = self.writers.lock().await;
+        
+        // Get or create writer for this pool
+        if !writers.contains_key(&pool_pk) {
+            let filename = format!("{}_{}.csv", rec.dex_type.to_string().to_lowercase(), &pool_pk.to_string()[..8]);
+            let path = self.out_dir.join(filename);
+            
+            // Headers that match PoolSnapshot::to_csv_row()
+            let headers = &[
+                "pool_address",
+                "token_mint",
+                "dex_type",
+                "reserve_base",
+                "reserve_quote",
+                "timestamp",
+                "price",
+                "liquidity_usd",
+            ];
+            
+            let writer = CsvWriter::with_config(&path, headers, self.csv_config.clone())?;
+            writers.insert(pool_pk, writer);
+        }
+        
+        // Write the record
+        let writer = writers.get_mut(&pool_pk)
+            .ok_or_else(|| AppError::CsvError("Writer not found after creation".to_string()))?;
+        
+        let csv_row = rec.snapshot.to_csv_row();
+        writer.write_record(&csv_row)?;
+        
         Ok(())
-    }
-}
-
-impl std::str::FromStr for Pubkey {
-    type Err = solana_sdk::pubkey::ParsePubkeyError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Pubkey::from_str(s)
     }
 }
