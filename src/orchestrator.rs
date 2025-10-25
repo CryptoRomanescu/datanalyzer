@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn test_orchestrator_new() {
-        let orchestrator = ReserveOrchestrator::new("https://api.mainnet-beta.solana.com".to_string());
+        let _orchestrator = ReserveOrchestrator::new("https://api.mainnet-beta.solana.com".to_string());
         // Just verify it constructs without panic
         assert!(true);
     }
@@ -208,5 +208,141 @@ mod tests {
         let (base, quote) = result.unwrap();
         assert_eq!(base, 5000);
         assert_eq!(quote, 10000);
+    }
+
+    #[test]
+    fn test_reserve_info_clone() {
+        let reserve_info = ReserveInfo::Direct {
+            base: 1000,
+            quote: 2000,
+        };
+        let cloned = reserve_info.clone();
+        assert_eq!(reserve_info, cloned);
+    }
+
+    #[test]
+    fn test_vault_info_clone() {
+        let vault_info = VaultInfo {
+            coin_vault: Pubkey::new_unique(),
+            pc_vault: Pubkey::new_unique(),
+            coin_mint: Pubkey::new_unique(),
+            pc_mint: Pubkey::new_unique(),
+        };
+        
+        let reserve_info = ReserveInfo::RequiresVaults(vault_info);
+        let cloned = reserve_info.clone();
+        assert_eq!(reserve_info, cloned);
+    }
+}
+
+// Integration tests for full end-to-end orchestrator functionality
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::dex::raydium::{AmmInfo, RaydiumDecoder};
+    use crate::dex::pumpfun::PumpFunDecoder;
+    use solana_sdk::pubkey::Pubkey;
+
+    /// Test end-to-end flow: Raydium decoder → ReserveInfo
+    #[test]
+    fn test_raydium_decoder_to_reserve_info() {
+        let decoder = RaydiumDecoder;
+        
+        // Create a test AmmInfo structure
+        let mut amm_info = AmmInfo::default();
+        amm_info.status = 1; // Initialized
+        amm_info.coin_vault = Pubkey::new_unique();
+        amm_info.pc_vault = Pubkey::new_unique();
+        amm_info.coin_vault_mint = Pubkey::new_unique();
+        amm_info.pc_vault_mint = Pubkey::new_unique();
+        amm_info.lp_mint = Pubkey::new_unique();
+        amm_info.open_orders = Pubkey::new_unique();
+        amm_info.market = Pubkey::new_unique();
+        amm_info.market_program = Pubkey::new_unique();
+        amm_info.target_orders = Pubkey::new_unique();
+        amm_info.amm_owner = Pubkey::new_unique();
+
+        // Convert to bytes
+        let mut data = vec![0u8; 752];
+        let amm_bytes = bytemuck::bytes_of(&amm_info);
+        data.copy_from_slice(amm_bytes);
+
+        // Decode to ReserveInfo
+        let reserve_info = decoder.decode_reserve_info(&data).unwrap();
+
+        // Verify we get RequiresVaults
+        match reserve_info {
+            ReserveInfo::RequiresVaults(vault_info) => {
+                assert_eq!(vault_info.coin_vault, amm_info.coin_vault);
+                assert_eq!(vault_info.pc_vault, amm_info.pc_vault);
+                assert_eq!(vault_info.coin_mint, amm_info.coin_vault_mint);
+                assert_eq!(vault_info.pc_mint, amm_info.pc_vault_mint);
+            }
+            _ => panic!("Expected RequiresVaults for Raydium"),
+        }
+    }
+
+    /// Test end-to-end flow: PumpFun decoder → ReserveInfo
+    #[test]
+    fn test_pumpfun_decoder_to_reserve_info() {
+        let decoder = PumpFunDecoder;
+        
+        // Create test PumpFun account data
+        let mut data = vec![0u8; 256];
+        let token_reserve = 1000000u64;
+        let sol_reserve = 500000u64;
+        
+        // Set token reserve at offset 0x18
+        data[0x18..0x20].copy_from_slice(&token_reserve.to_le_bytes());
+        // Set SOL reserve at offset 0x20
+        data[0x20..0x28].copy_from_slice(&sol_reserve.to_le_bytes());
+
+        // Decode to ReserveInfo
+        let reserve_info = decoder.decode_reserve_info(&data).unwrap();
+
+        // Verify we get Direct
+        match reserve_info {
+            ReserveInfo::Direct { base, quote } => {
+                assert_eq!(base, token_reserve);
+                assert_eq!(quote, sol_reserve);
+            }
+            _ => panic!("Expected Direct for PumpFun"),
+        }
+    }
+
+    /// Test orchestrator can resolve both types
+    #[test]
+    fn test_orchestrator_handles_both_types() {
+        let orchestrator = ReserveOrchestrator::new("https://api.mainnet-beta.solana.com".to_string());
+
+        // Test Direct reserves
+        let direct = ReserveInfo::Direct {
+            base: 1000,
+            quote: 2000,
+        };
+        let (base, quote) = orchestrator.resolve_reserves(&direct).unwrap();
+        assert_eq!(base, 1000);
+        assert_eq!(quote, 2000);
+
+        // Note: Testing RequiresVaults would require a real or mock RPC server
+        // For now, we verify the structure is correct
+        let vault_info = VaultInfo {
+            coin_vault: Pubkey::new_unique(),
+            pc_vault: Pubkey::new_unique(),
+            coin_mint: Pubkey::new_unique(),
+            pc_mint: Pubkey::new_unique(),
+        };
+        let vaults = ReserveInfo::RequiresVaults(vault_info);
+        
+        // This will fail with RPC error in test environment, but that's expected
+        // The important thing is the API accepts it
+        let result = orchestrator.resolve_reserves(&vaults);
+        assert!(result.is_err()); // Expected to fail without real RPC
+        
+        // Verify error is RPC-related, not a logic error
+        if let Err(e) = result {
+            let err_msg = e.to_string();
+            assert!(err_msg.contains("RPC") || err_msg.contains("Failed to fetch"));
+        }
     }
 }
