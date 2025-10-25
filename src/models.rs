@@ -1,7 +1,7 @@
+use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
-use crate::error::AppError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DexType {
@@ -63,7 +63,7 @@ impl PoolSnapshot {
     ) -> Result<Self, AppError> {
         // Note: Zero reserves are now valid (empty pool state)
         // Validation removed to allow zero reserves per Task 10.3
-        
+
         Ok(PoolSnapshot {
             pool_address,
             token_mint,
@@ -110,14 +110,14 @@ impl PoolSnapshot {
             self.timestamp.to_string(),
             self.price.to_string(),
         ];
-        
+
         // Add liquidity_usd if present
         if let Some(liquidity) = self.liquidity_usd {
             row.push(format!("{:.2}", liquidity));
         } else {
             row.push(String::new());
         }
-        
+
         row
     }
 }
@@ -133,7 +133,7 @@ mod tests {
         assert_eq!("pump_fun".parse::<DexType>().unwrap(), DexType::PumpFun);
         assert_eq!("raydium".parse::<DexType>().unwrap(), DexType::Raydium);
         assert_eq!("Raydium".parse::<DexType>().unwrap(), DexType::Raydium);
-        
+
         assert!("unknown".parse::<DexType>().is_err());
     }
 
@@ -200,7 +200,7 @@ mod tests {
         .unwrap();
 
         let csv_row = snapshot.to_csv_row();
-        assert_eq!(csv_row.len(), 8);  // Updated to 8 to include liquidity_usd
+        assert_eq!(csv_row.len(), 8); // Updated to 8 to include liquidity_usd
         assert_eq!(csv_row[0], "pool123");
         assert_eq!(csv_row[1], "token456");
         assert_eq!(csv_row[2], "PumpFun");
@@ -208,7 +208,7 @@ mod tests {
         assert_eq!(csv_row[4], "2000");
         assert_eq!(csv_row[5], "1234567890");
         assert_eq!(csv_row[6], "0.5");
-        assert_eq!(csv_row[7], "");  // liquidity_usd is None
+        assert_eq!(csv_row[7], ""); // liquidity_usd is None
     }
 
     #[test]
@@ -232,4 +232,3 @@ mod tests {
         assert_eq!(csv_row[7], "1500.75");
     }
 }
-

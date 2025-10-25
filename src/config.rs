@@ -1,10 +1,10 @@
-use solana_sdk::pubkey::Pubkey;
-use std::str::FromStr;
-use std::fs;
-use std::path::Path;
-use serde::Deserialize;
 use crate::error::AppError;
 use crate::models::DexType;
+use serde::Deserialize;
+use solana_sdk::pubkey::Pubkey;
+use std::fs;
+use std::path::Path;
+use std::str::FromStr;
 
 /// TOML configuration structure for a pool
 #[derive(Debug, Clone, Deserialize)]
@@ -17,14 +17,19 @@ pub struct PoolConfigToml {
 impl PoolConfigToml {
     /// Convert PoolConfigToml to runtime PoolConfig
     pub fn into_pool_config(self) -> Result<PoolConfig, AppError> {
-        let pool_address = Pubkey::from_str(&self.pool_address)
-            .map_err(|e| AppError::ConfigError(format!("Invalid pool address '{}': {}", self.pool_address, e)))?;
-        
+        let pool_address = Pubkey::from_str(&self.pool_address).map_err(|e| {
+            AppError::ConfigError(format!(
+                "Invalid pool address '{}': {}",
+                self.pool_address, e
+            ))
+        })?;
+
         let dex_type = self.dex_type.parse::<DexType>()?;
-        
-        let token_mint = Pubkey::from_str(&self.token_mint)
-            .map_err(|e| AppError::ConfigError(format!("Invalid token mint '{}': {}", self.token_mint, e)))?;
-        
+
+        let token_mint = Pubkey::from_str(&self.token_mint).map_err(|e| {
+            AppError::ConfigError(format!("Invalid token mint '{}': {}", self.token_mint, e))
+        })?;
+
         PoolConfig::new(pool_address, dex_type, token_mint)
     }
 }
@@ -44,78 +49,94 @@ impl AppConfig {
     pub fn load(path: &str) -> Result<Self, AppError> {
         // Check if file exists
         if !Path::new(path).exists() {
-            return Err(AppError::ConfigError(format!("Configuration file not found: {}", path)));
+            return Err(AppError::ConfigError(format!(
+                "Configuration file not found: {}",
+                path
+            )));
         }
-        
+
         // Read file contents
-        let contents = fs::read_to_string(path)
-            .map_err(|e| AppError::ConfigError(format!("Failed to read config file '{}': {}", path, e)))?;
-        
+        let contents = fs::read_to_string(path).map_err(|e| {
+            AppError::ConfigError(format!("Failed to read config file '{}': {}", path, e))
+        })?;
+
         // Parse TOML
         let config: AppConfig = toml::from_str(&contents)
             .map_err(|e| AppError::ConfigError(format!("Failed to parse TOML: {}", e)))?;
-        
+
         // Validate configuration
         config.validate()?;
-        
+
         Ok(config)
     }
-    
+
     /// Validate the configuration
     fn validate(&self) -> Result<(), AppError> {
         // Validate RPC URL
         if self.rpc_url.is_empty() {
             return Err(AppError::ConfigError("RPC URL cannot be empty".to_string()));
         }
-        
+
         if !self.rpc_url.starts_with("http://") && !self.rpc_url.starts_with("https://") {
-            return Err(AppError::ConfigError(
-                format!("RPC URL must start with http:// or https://, got: {}", self.rpc_url)
-            ));
+            return Err(AppError::ConfigError(format!(
+                "RPC URL must start with http:// or https://, got: {}",
+                self.rpc_url
+            )));
         }
-        
+
         // Validate RPC WebSocket URL
         if self.rpc_ws_url.is_empty() {
-            return Err(AppError::ConfigError("RPC WebSocket URL cannot be empty".to_string()));
-        }
-        
-        if !self.rpc_ws_url.starts_with("ws://") && !self.rpc_ws_url.starts_with("wss://") {
             return Err(AppError::ConfigError(
-                format!("RPC WebSocket URL must start with ws:// or wss://, got: {}", self.rpc_ws_url)
+                "RPC WebSocket URL cannot be empty".to_string(),
             ));
         }
-        
+
+        if !self.rpc_ws_url.starts_with("ws://") && !self.rpc_ws_url.starts_with("wss://") {
+            return Err(AppError::ConfigError(format!(
+                "RPC WebSocket URL must start with ws:// or wss://, got: {}",
+                self.rpc_ws_url
+            )));
+        }
+
         // Validate output directory
         if self.output_dir.is_empty() {
-            return Err(AppError::ConfigError("Output directory cannot be empty".to_string()));
-        }
-        
-        // Validate snapshot interval
-        if self.snapshot_interval_ms == 0 {
-            return Err(AppError::ConfigError("Snapshot interval must be greater than 0".to_string()));
-        }
-        
-        if self.snapshot_interval_ms < 100 {
             return Err(AppError::ConfigError(
-                format!("Snapshot interval too small ({}ms), minimum is 100ms", self.snapshot_interval_ms)
+                "Output directory cannot be empty".to_string(),
             ));
         }
-        
+
+        // Validate snapshot interval
+        if self.snapshot_interval_ms == 0 {
+            return Err(AppError::ConfigError(
+                "Snapshot interval must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.snapshot_interval_ms < 100 {
+            return Err(AppError::ConfigError(format!(
+                "Snapshot interval too small ({}ms), minimum is 100ms",
+                self.snapshot_interval_ms
+            )));
+        }
+
         // Validate pools list
         if self.pools.is_empty() {
-            return Err(AppError::ConfigError("At least one pool must be configured".to_string()));
+            return Err(AppError::ConfigError(
+                "At least one pool must be configured".to_string(),
+            ));
         }
-        
+
         Ok(())
     }
-    
+
     /// Convert AppConfig to runtime configuration with validated PoolConfig instances
     pub fn into_runtime_config(self) -> Result<RuntimeConfig, AppError> {
-        let pools: Result<Vec<PoolConfig>, AppError> = self.pools
+        let pools: Result<Vec<PoolConfig>, AppError> = self
+            .pools
             .into_iter()
             .map(|pool_toml| pool_toml.into_pool_config())
             .collect();
-        
+
         Ok(RuntimeConfig {
             rpc_url: self.rpc_url,
             rpc_ws_url: self.rpc_ws_url,
@@ -144,7 +165,11 @@ pub struct PoolConfig {
 }
 
 impl PoolConfig {
-    pub fn new(pool_address: Pubkey, dex_type: DexType, token_mint: Pubkey) -> Result<Self, AppError> {
+    pub fn new(
+        pool_address: Pubkey,
+        dex_type: DexType,
+        token_mint: Pubkey,
+    ) -> Result<Self, AppError> {
         let config = PoolConfig {
             pool_address,
             dex_type,
@@ -160,13 +185,13 @@ impl PoolConfig {
                 "Pool address cannot be default/zero pubkey".to_string(),
             ));
         }
-        
+
         if self.token_mint == Pubkey::default() {
             return Err(AppError::ConfigError(
                 "Token mint cannot be default/zero pubkey".to_string(),
             ));
         }
-        
+
         Ok(())
     }
 
@@ -260,37 +285,20 @@ mod tests {
 
     #[test]
     fn test_pool_config_validation() {
-        let result = PoolConfig::new(
-            Pubkey::default(),
-            DexType::Raydium,
-            Pubkey::new_unique(),
-        );
+        let result = PoolConfig::new(Pubkey::default(), DexType::Raydium, Pubkey::new_unique());
         assert!(result.is_err());
 
-        let result = PoolConfig::new(
-            Pubkey::new_unique(),
-            DexType::Raydium,
-            Pubkey::default(),
-        );
+        let result = PoolConfig::new(Pubkey::new_unique(), DexType::Raydium, Pubkey::default());
         assert!(result.is_err());
 
-        let result = PoolConfig::new(
-            Pubkey::new_unique(),
-            DexType::Raydium,
-            Pubkey::new_unique(),
-        );
+        let result = PoolConfig::new(Pubkey::new_unique(), DexType::Raydium, Pubkey::new_unique());
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_pool_config_csv_filename() {
         let pool_addr = Pubkey::new_unique();
-        let config = PoolConfig::new(
-            pool_addr,
-            DexType::PumpFun,
-            Pubkey::new_unique(),
-        )
-        .unwrap();
+        let config = PoolConfig::new(pool_addr, DexType::PumpFun, Pubkey::new_unique()).unwrap();
 
         let filename = config.get_csv_filename();
         assert!(filename.starts_with("pumpfun_"));
@@ -301,7 +309,7 @@ mod tests {
     fn test_pool_config_builder() {
         let pool_addr = Pubkey::new_unique();
         let token_mint = Pubkey::new_unique();
-        
+
         let config = PoolConfig::builder()
             .pool_address_pubkey(pool_addr)
             .dex_type(DexType::Raydium)
@@ -320,7 +328,7 @@ mod tests {
             .pool_address_pubkey(Pubkey::new_unique())
             .dex_type(DexType::Raydium)
             .build();
-        
+
         assert!(result.is_err());
     }
 
@@ -328,7 +336,7 @@ mod tests {
     fn test_pool_config_builder_string_input() {
         let pool_addr = Pubkey::new_unique();
         let token_mint = Pubkey::new_unique();
-        
+
         let result = PoolConfig::builder()
             .pool_address(&pool_addr.to_string())
             .unwrap()
@@ -345,16 +353,16 @@ mod tests {
     fn test_pool_config_toml_conversion() {
         let pool_addr = Pubkey::new_unique();
         let token_mint = Pubkey::new_unique();
-        
+
         let toml_config = PoolConfigToml {
             pool_address: pool_addr.to_string(),
             dex_type: "raydium".to_string(),
             token_mint: token_mint.to_string(),
         };
-        
+
         let result = toml_config.into_pool_config();
         assert!(result.is_ok());
-        
+
         let config = result.unwrap();
         assert_eq!(config.pool_address(), &pool_addr);
         assert_eq!(config.dex_type(), DexType::Raydium);
@@ -368,7 +376,7 @@ mod tests {
             dex_type: "raydium".to_string(),
             token_mint: Pubkey::new_unique().to_string(),
         };
-        
+
         let result = toml_config.into_pool_config();
         assert!(result.is_err());
     }
@@ -380,7 +388,7 @@ mod tests {
             dex_type: "unknown_dex".to_string(),
             token_mint: Pubkey::new_unique().to_string(),
         };
-        
+
         let result = toml_config.into_pool_config();
         assert!(result.is_err());
     }
@@ -402,7 +410,7 @@ mod tests {
             snapshot_interval_ms: 1000,
             pools: vec![],
         };
-        
+
         let result = config.validate();
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -418,7 +426,7 @@ mod tests {
             snapshot_interval_ms: 1000,
             pools: vec![],
         };
-        
+
         let result = config.validate();
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -434,7 +442,7 @@ mod tests {
             snapshot_interval_ms: 1000,
             pools: vec![],
         };
-        
+
         let result = config.validate();
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -450,7 +458,7 @@ mod tests {
             snapshot_interval_ms: 1000,
             pools: vec![],
         };
-        
+
         let result = config.validate();
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -466,7 +474,7 @@ mod tests {
             snapshot_interval_ms: 0,
             pools: vec![],
         };
-        
+
         let result = config.validate();
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -482,7 +490,7 @@ mod tests {
             snapshot_interval_ms: 50,
             pools: vec![],
         };
-        
+
         let result = config.validate();
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -498,7 +506,7 @@ mod tests {
             snapshot_interval_ms: 1000,
             pools: vec![],
         };
-        
+
         let result = config.validate();
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -509,24 +517,22 @@ mod tests {
     fn test_app_config_into_runtime_config() {
         let pool_addr = Pubkey::new_unique();
         let token_mint = Pubkey::new_unique();
-        
+
         let config = AppConfig {
             rpc_url: "https://api.mainnet-beta.solana.com".to_string(),
             rpc_ws_url: "wss://api.mainnet-beta.solana.com".to_string(),
             output_dir: "./snapshots".to_string(),
             snapshot_interval_ms: 5000,
-            pools: vec![
-                PoolConfigToml {
-                    pool_address: pool_addr.to_string(),
-                    dex_type: "raydium".to_string(),
-                    token_mint: token_mint.to_string(),
-                },
-            ],
+            pools: vec![PoolConfigToml {
+                pool_address: pool_addr.to_string(),
+                dex_type: "raydium".to_string(),
+                token_mint: token_mint.to_string(),
+            }],
         };
-        
+
         let result = config.into_runtime_config();
         assert!(result.is_ok());
-        
+
         let runtime = result.unwrap();
         assert_eq!(runtime.rpc_url, "https://api.mainnet-beta.solana.com");
         assert_eq!(runtime.pools.len(), 1);
@@ -540,15 +546,13 @@ mod tests {
             rpc_ws_url: "wss://api.mainnet-beta.solana.com".to_string(),
             output_dir: "./snapshots".to_string(),
             snapshot_interval_ms: 5000,
-            pools: vec![
-                PoolConfigToml {
-                    pool_address: "invalid".to_string(),
-                    dex_type: "raydium".to_string(),
-                    token_mint: Pubkey::new_unique().to_string(),
-                },
-            ],
+            pools: vec![PoolConfigToml {
+                pool_address: "invalid".to_string(),
+                dex_type: "raydium".to_string(),
+                token_mint: Pubkey::new_unique().to_string(),
+            }],
         };
-        
+
         let result = config.into_runtime_config();
         assert!(result.is_err());
     }
@@ -556,11 +560,12 @@ mod tests {
     #[test]
     fn test_app_config_load_from_toml() {
         use std::io::Write;
-        
+
         let pool_addr = Pubkey::new_unique();
         let token_mint = Pubkey::new_unique();
-        
-        let toml_content = format!(r#"
+
+        let toml_content = format!(
+            r#"
 rpc_url = "https://api.mainnet-beta.solana.com"
 rpc_ws_url = "wss://api.mainnet-beta.solana.com"
 output_dir = "./snapshots"
@@ -575,21 +580,26 @@ token_mint = "{}"
 pool_address = "{}"
 dex_type = "pumpfun"
 token_mint = "{}"
-"#, pool_addr, token_mint, Pubkey::new_unique(), Pubkey::new_unique());
-        
+"#,
+            pool_addr,
+            token_mint,
+            Pubkey::new_unique(),
+            Pubkey::new_unique()
+        );
+
         // Create a temporary file
         let temp_path = "/tmp/test_config.toml";
         let mut file = std::fs::File::create(temp_path).unwrap();
         file.write_all(toml_content.as_bytes()).unwrap();
-        
+
         // Load config
         let result = AppConfig::load(temp_path);
         assert!(result.is_ok());
-        
+
         let config = result.unwrap();
         assert_eq!(config.rpc_url, "https://api.mainnet-beta.solana.com");
         assert_eq!(config.pools.len(), 2);
-        
+
         // Cleanup
         std::fs::remove_file(temp_path).ok();
     }
@@ -597,27 +607,25 @@ token_mint = "{}"
     #[test]
     fn test_app_config_load_invalid_toml() {
         use std::io::Write;
-        
+
         let toml_content = r#"
 rpc_url = "https://api.mainnet-beta.solana.com"
 # Invalid TOML - missing closing quote
 rpc_ws_url = "wss://api.mainnet-beta.solana.com
 "#;
-        
+
         // Create a temporary file
         let temp_path = "/tmp/test_invalid_config.toml";
         let mut file = std::fs::File::create(temp_path).unwrap();
         file.write_all(toml_content.as_bytes()).unwrap();
-        
+
         // Load config should fail
         let result = AppConfig::load(temp_path);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("Failed to parse TOML"));
-        
+
         // Cleanup
         std::fs::remove_file(temp_path).ok();
     }
-
-
 }

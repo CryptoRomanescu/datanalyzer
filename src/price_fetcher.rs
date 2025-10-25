@@ -145,10 +145,10 @@ impl PriceFetcher {
         }
 
         log::debug!("Cache miss for token: {}, fetching from API", token_id);
-        
+
         // Fetch from API with retry logic
         let price = self.fetch_with_retry(token_id, 3).await?;
-        
+
         // Update cache
         {
             let mut cache = self.cache.write().await;
@@ -161,7 +161,7 @@ impl PriceFetcher {
     /// Fetch price with retry logic for transient errors
     async fn fetch_with_retry(&self, token_id: &str, max_retries: u32) -> Result<f64, AppError> {
         let mut last_error = None;
-        
+
         for attempt in 0..max_retries {
             if attempt > 0 {
                 let delay = Duration::from_millis(500 * (1 << attempt)); // Exponential backoff
@@ -177,7 +177,7 @@ impl PriceFetcher {
             {
                 let mut metrics = self.metrics.write().await;
                 metrics.total_requests += 1;
-                
+
                 if result.is_ok() {
                     metrics.successful_requests += 1;
                     metrics.total_response_time_ms += elapsed.as_millis() as u64;
@@ -189,15 +189,23 @@ impl PriceFetcher {
             match result {
                 Ok(price) => return Ok(price),
                 Err(e) => {
-                    log::warn!("Attempt {} failed for token {}: {}", attempt + 1, token_id, e);
+                    log::warn!(
+                        "Attempt {} failed for token {}: {}",
+                        attempt + 1,
+                        token_id,
+                        e
+                    );
                     last_error = Some(e);
                 }
             }
         }
 
-        Err(last_error.unwrap_or_else(|| 
-            AppError::PriceError(format!("Failed to fetch price for {} after {} retries", token_id, max_retries))
-        ))
+        Err(last_error.unwrap_or_else(|| {
+            AppError::PriceError(format!(
+                "Failed to fetch price for {} after {} retries",
+                token_id, max_retries
+            ))
+        }))
     }
 
     /// Fetch price directly from API
@@ -207,16 +215,18 @@ impl PriceFetcher {
             self.api_url, token_id
         );
 
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .send()
             .await
             .map_err(|e| AppError::PriceError(format!("HTTP request failed: {}", e)))?;
 
         if !response.status().is_success() {
-            return Err(AppError::PriceError(
-                format!("API returned error status: {}", response.status())
-            ));
+            return Err(AppError::PriceError(format!(
+                "API returned error status: {}",
+                response.status()
+            )));
         }
 
         let body = response
@@ -227,14 +237,16 @@ impl PriceFetcher {
         let parsed: HashMap<String, CoinGeckoSimplePrice> = serde_json::from_str(&body)
             .map_err(|e| AppError::PriceError(format!("Failed to parse JSON response: {}", e)))?;
 
-        parsed
-            .get(token_id)
-            .map(|p| p.usd)
-            .ok_or_else(|| AppError::PriceError(format!("Token {} not found in response", token_id)))
+        parsed.get(token_id).map(|p| p.usd).ok_or_else(|| {
+            AppError::PriceError(format!("Token {} not found in response", token_id))
+        })
     }
 
     /// Fetch prices for multiple tokens using batch request
-    pub async fn fetch_prices(&self, token_ids: &[String]) -> Result<HashMap<String, f64>, AppError> {
+    pub async fn fetch_prices(
+        &self,
+        token_ids: &[String],
+    ) -> Result<HashMap<String, f64>, AppError> {
         if token_ids.is_empty() {
             return Ok(HashMap::new());
         }
@@ -270,10 +282,7 @@ impl PriceFetcher {
         );
 
         let start_time = Instant::now();
-        let fetch_result = self.client
-            .get(&url)
-            .send()
-            .await;
+        let fetch_result = self.client.get(&url).send().await;
         let elapsed = start_time.elapsed();
 
         // Update metrics
@@ -285,18 +294,22 @@ impl PriceFetcher {
         match fetch_result {
             Ok(response) => {
                 if !response.status().is_success() {
-                    log::warn!("Batch API request failed with status: {}", response.status());
+                    log::warn!(
+                        "Batch API request failed with status: {}",
+                        response.status()
+                    );
                     // Fall back to individual requests with retry
                     return self.fetch_prices_individually(&to_fetch).await;
                 }
 
-                let body = response
-                    .text()
-                    .await
-                    .map_err(|e| AppError::PriceError(format!("Failed to read response body: {}", e)))?;
+                let body = response.text().await.map_err(|e| {
+                    AppError::PriceError(format!("Failed to read response body: {}", e))
+                })?;
 
                 let parsed: HashMap<String, CoinGeckoSimplePrice> = serde_json::from_str(&body)
-                    .map_err(|e| AppError::PriceError(format!("Failed to parse JSON response: {}", e)))?;
+                    .map_err(|e| {
+                        AppError::PriceError(format!("Failed to parse JSON response: {}", e))
+                    })?;
 
                 // Update metrics and cache
                 {
@@ -324,11 +337,14 @@ impl PriceFetcher {
                 Ok(result)
             }
             Err(e) => {
-                log::warn!("Batch request failed: {}, falling back to individual requests", e);
+                log::warn!(
+                    "Batch request failed: {}, falling back to individual requests",
+                    e
+                );
                 let mut metrics = self.metrics.write().await;
                 metrics.failed_requests += 1;
                 drop(metrics);
-                
+
                 // Fall back to individual requests
                 self.fetch_prices_individually(&to_fetch).await
             }
@@ -336,9 +352,12 @@ impl PriceFetcher {
     }
 
     /// Fetch prices individually with retry logic (fallback for batch failure)
-    async fn fetch_prices_individually(&self, token_ids: &[String]) -> Result<HashMap<String, f64>, AppError> {
+    async fn fetch_prices_individually(
+        &self,
+        token_ids: &[String],
+    ) -> Result<HashMap<String, f64>, AppError> {
         let mut result = HashMap::new();
-        
+
         for token_id in token_ids {
             match self.fetch_with_retry(token_id, 3).await {
                 Ok(price) => {
@@ -349,12 +368,16 @@ impl PriceFetcher {
                     // Try to use stale cache as fallback
                     let cache = self.cache.read().await;
                     if let Some(cached) = cache.get(token_id) {
-                        log::warn!("Using stale cached price for {} (age: {:?})", token_id, cached.age());
+                        log::warn!(
+                            "Using stale cached price for {} (age: {:?})",
+                            token_id,
+                            cached.age()
+                        );
                         result.insert(token_id.clone(), cached.price());
                     }
                 }
             }
-            
+
             // Rate limiting: sleep between individual requests
             sleep(Duration::from_millis(200)).await;
         }
@@ -371,14 +394,17 @@ impl PriceFetcher {
         tokio::spawn(async move {
             let mut shutdown_rx = shutdown_signal;
             let refresh_interval = self.cache_ttl / 2;
-            
-            log::info!("Starting price refresh loop with interval: {:?}", refresh_interval);
-            
+
+            log::info!(
+                "Starting price refresh loop with interval: {:?}",
+                refresh_interval
+            );
+
             loop {
                 tokio::select! {
                     _ = sleep(refresh_interval) => {
                         log::debug!("Refreshing prices for {} tokens", tokens.len());
-                        
+
                         match self.fetch_prices(&tokens).await {
                             Ok(prices) => {
                                 log::debug!("Successfully refreshed {} prices", prices.len());
@@ -405,11 +431,15 @@ impl PriceFetcher {
             Ok(price) => Ok(price),
             Err(e) => {
                 log::warn!("Failed to fetch fresh price for {}: {}", token_id, e);
-                
+
                 // Try stale cache
                 let cache = self.cache.read().await;
                 if let Some(cached) = cache.get(token_id) {
-                    log::warn!("Using stale cached price for {} (age: {:?})", token_id, cached.age());
+                    log::warn!(
+                        "Using stale cached price for {} (age: {:?})",
+                        token_id,
+                        cached.age()
+                    );
                     Ok(cached.price())
                 } else {
                     Err(e)
@@ -493,7 +523,7 @@ mod tests {
         metrics.total_requests = 10;
         metrics.successful_requests = 8;
         metrics.failed_requests = 2;
-        
+
         assert_eq!(metrics.success_rate(), 80.0);
     }
 
@@ -508,7 +538,7 @@ mod tests {
         let mut metrics = PriceFetcherMetrics::default();
         metrics.successful_requests = 5;
         metrics.total_response_time_ms = 1000;
-        
+
         assert_eq!(metrics.avg_response_time_ms(), 200.0);
     }
 
@@ -536,14 +566,14 @@ mod tests {
     #[tokio::test]
     async fn test_reset_metrics() {
         let fetcher = PriceFetcher::new(Duration::from_secs(300));
-        
+
         // Simulate some metrics
         {
             let mut metrics = fetcher.metrics.write().await;
             metrics.total_requests = 10;
             metrics.successful_requests = 8;
         }
-        
+
         fetcher.reset_metrics().await;
         let metrics = fetcher.get_metrics().await;
         assert_eq!(metrics.total_requests, 0);

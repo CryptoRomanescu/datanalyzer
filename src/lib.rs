@@ -10,8 +10,8 @@ pub mod price_fetcher;
 pub mod websocket;
 
 // Re-export commonly used types
-pub use dex::{create_decoder, DexDecoder, DecoderRegistry, DecoderStats};
+pub use dex::{create_decoder, DecoderRegistry, DecoderStats, DexDecoder};
 pub use error::AppError;
 pub use models::{DexType, PoolSnapshot};
-pub use price_fetcher::{PriceFetcher, CachedPrice, PriceFetcherMetrics};
+pub use price_fetcher::{CachedPrice, PriceFetcher, PriceFetcherMetrics};
 pub use websocket::WebSocketManager;

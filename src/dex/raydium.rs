@@ -59,18 +59,18 @@ pub struct Fees {
     pub min_separate_numerator: u64,
     /// Denominator of the minimum separation fee
     pub min_separate_denominator: u64,
-    
+
     /// Numerator of the trade fee (typically 25/10000 = 0.25%)
     pub trade_fee_numerator: u64,
     /// Denominator of the trade fee
     /// Must equal min_separate_denominator
     pub trade_fee_denominator: u64,
-    
+
     /// Numerator of PnL distribution (typically 12/100 = 12%)
     pub pnl_numerator: u64,
     /// Denominator of PnL distribution
     pub pnl_denominator: u64,
-    
+
     /// Numerator of swap fee (typically 25/10000 = 0.25%)
     pub swap_fee_numerator: u64,
     /// Denominator of swap fee
@@ -105,14 +105,14 @@ pub struct StateData {
     pub padding: [u64; 2],
     /// Time when transitioning from OrderBookOnly to Initialized
     pub orderbook_to_init_time: u64,
-    
+
     /// Cumulative amount of coin tokens swapped in (128-bit for large volumes)
     pub swap_coin_in_amount: u128,
     /// Cumulative amount of PC swapped out
     pub swap_pc_out_amount: u128,
     /// Accumulated fees in PC from coin->PC swaps
     pub swap_acc_pc_fee: u64,
-    
+
     /// Cumulative amount of PC swapped in
     pub swap_pc_in_amount: u128,
     /// Cumulative amount of coin swapped out
@@ -178,21 +178,21 @@ pub struct AmmInfo {
     pub max_price_multiplier: u64,
     /// System decimal value for normalization
     pub sys_decimal_value: u64,
-    
+
     /// Fee configuration (64 bytes)
     pub fees: Fees,
-    
+
     /// Statistical data (144 bytes)
     pub state_data: StateData,
-    
+
     /// **CRITICAL**: Pubkey of SPL token account holding coin/base reserves
     /// To get actual coin reserve amount, fetch this account via RPC and read the 'amount' field
     pub coin_vault: Pubkey,
-    
+
     /// **CRITICAL**: Pubkey of SPL token account holding PC/quote reserves
     /// To get actual PC reserve amount, fetch this account via RPC and read the 'amount' field
     pub pc_vault: Pubkey,
-    
+
     /// Mint address of coin/base token
     pub coin_vault_mint: Pubkey,
     /// Mint address of PC/quote token
@@ -207,10 +207,10 @@ pub struct AmmInfo {
     pub market_program: Pubkey,
     /// Target orders account
     pub target_orders: Pubkey,
-    
+
     /// Reserved for future use
     pub padding1: [u64; 8],
-    
+
     /// AMM owner/admin pubkey
     pub amm_owner: Pubkey,
     /// Current LP token supply in the pool
@@ -306,9 +306,8 @@ impl RaydiumDecoder {
 
         // Use bytemuck for zero-copy deserialization
         // This is safe because we've verified the size and AmmInfo is Pod
-        bytemuck::try_from_bytes::<AmmInfo>(account_data).map_err(|e| {
-            AppError::DecodingError(format!("Failed to deserialize AmmInfo: {}", e))
-        })
+        bytemuck::try_from_bytes::<AmmInfo>(account_data)
+            .map_err(|e| AppError::DecodingError(format!("Failed to deserialize AmmInfo: {}", e)))
     }
 
     /// Extract vault information from account data.
@@ -364,8 +363,7 @@ impl DexDecoder for RaydiumDecoder {
              Coin vault: {}, PC vault: {}. \
              Use an async RPC client to fetch these accounts and extract the 'amount' field \
              from the SPL token account data.",
-            amm_info.coin_vault,
-            amm_info.pc_vault
+            amm_info.coin_vault, amm_info.pc_vault
         )))
     }
 
@@ -385,20 +383,20 @@ impl DexDecoder for RaydiumDecoder {
         // Validate status is not uninitialized (status != 0)
         if amm_info.status == 0 {
             return Err(AppError::DecodingError(
-                "Pool is uninitialized (status = 0)".to_string()
+                "Pool is uninitialized (status = 0)".to_string(),
             ));
         }
 
         // Validate vault pubkeys are not default/zero
         if amm_info.coin_vault == Pubkey::default() {
             return Err(AppError::DecodingError(
-                "Coin vault pubkey is default/zero".to_string()
+                "Coin vault pubkey is default/zero".to_string(),
             ));
         }
 
         if amm_info.pc_vault == Pubkey::default() {
             return Err(AppError::DecodingError(
-                "PC vault pubkey is default/zero".to_string()
+                "PC vault pubkey is default/zero".to_string(),
             ));
         }
 
@@ -414,16 +412,16 @@ mod tests {
     /// Helper function to create a valid AmmInfo structure for testing.
     fn create_test_amm_info() -> Vec<u8> {
         let mut data = vec![0u8; RaydiumDecoder::ACCOUNT_SIZE];
-        
+
         // Create a minimal valid AmmInfo structure
         let mut amm_info = AmmInfo::default();
-        
+
         // Set status to Initialized (1)
         amm_info.status = 1;
         amm_info.nonce = 255;
-        amm_info.coin_decimals = 9;  // SOL decimals
-        amm_info.pc_decimals = 6;    // USDC decimals
-        
+        amm_info.coin_decimals = 9; // SOL decimals
+        amm_info.pc_decimals = 6; // USDC decimals
+
         // Set vault pubkeys (non-default)
         amm_info.coin_vault = Pubkey::new_unique();
         amm_info.pc_vault = Pubkey::new_unique();
@@ -435,11 +433,11 @@ mod tests {
         amm_info.market_program = Pubkey::new_unique();
         amm_info.target_orders = Pubkey::new_unique();
         amm_info.amm_owner = Pubkey::new_unique();
-        
+
         // Copy the structure to bytes
         let amm_bytes = bytemuck::bytes_of(&amm_info);
         data.copy_from_slice(amm_bytes);
-        
+
         data
     }
 
@@ -467,7 +465,7 @@ mod tests {
     fn test_validate_account_size() {
         let decoder = RaydiumDecoder;
         let valid_data = create_test_amm_info();
-        
+
         let result = decoder.validate_account(&valid_data);
         assert!(result.is_ok());
     }
@@ -476,10 +474,10 @@ mod tests {
     fn test_validate_account_invalid_size() {
         let decoder = RaydiumDecoder;
         let invalid_data = vec![0u8; 100];
-        
+
         let result = decoder.validate_account(&invalid_data);
         assert!(result.is_err());
-        
+
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("Invalid Raydium account size"));
     }
@@ -489,10 +487,10 @@ mod tests {
         let decoder = RaydiumDecoder;
         // Create account with status = 0 (uninitialized)
         let data = vec![0u8; RaydiumDecoder::ACCOUNT_SIZE];
-        
+
         let result = decoder.validate_account(&data);
         assert!(result.is_err());
-        
+
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("uninitialized"));
     }
@@ -501,13 +499,13 @@ mod tests {
     fn test_validate_account_default_vault_pubkeys() {
         let decoder = RaydiumDecoder;
         let mut data = vec![0u8; RaydiumDecoder::ACCOUNT_SIZE];
-        
+
         // Set status to 1 (initialized) but leave vaults as default
         data[0] = 1; // status = 1 (little-endian u64)
-        
+
         let result = decoder.validate_account(&data);
         assert!(result.is_err());
-        
+
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("vault pubkey"));
     }
@@ -515,10 +513,10 @@ mod tests {
     #[test]
     fn test_deserialize_amm_info() {
         let data = create_test_amm_info();
-        
+
         let result = RaydiumDecoder::deserialize_amm_info(&data);
         assert!(result.is_ok());
-        
+
         let amm_info = result.unwrap();
         // Copy values to avoid packed struct alignment issues
         let status = amm_info.status;
@@ -527,7 +525,7 @@ mod tests {
         let pc_decimals = amm_info.pc_decimals;
         let coin_vault = amm_info.coin_vault;
         let pc_vault = amm_info.pc_vault;
-        
+
         assert_eq!(status, 1);
         assert_eq!(nonce, 255);
         assert_eq!(coin_decimals, 9);
@@ -540,10 +538,10 @@ mod tests {
     fn test_decode_reserves_returns_vault_info() {
         let decoder = RaydiumDecoder;
         let data = create_test_amm_info();
-        
+
         let result = decoder.decode_reserves(&data);
         assert!(result.is_err());
-        
+
         // The error should contain information about vault pubkeys
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("vault"));
@@ -556,16 +554,16 @@ mod tests {
         // Test that we can correctly deserialize specific fields
         let data = create_test_amm_info();
         let amm_info = RaydiumDecoder::deserialize_amm_info(&data).unwrap();
-        
+
         // Copy values to avoid packed struct alignment issues
         let status = amm_info.status;
         let coin_vault = amm_info.coin_vault;
         let pc_vault = amm_info.pc_vault;
-        
+
         // Verify basic fields
         assert_eq!(status, 1);
         assert!(status > 0);
-        
+
         // Verify vault pubkeys are non-zero
         assert_ne!(coin_vault, Pubkey::default());
         assert_ne!(pc_vault, Pubkey::default());
@@ -579,7 +577,7 @@ mod tests {
         let min_sep_den = fees.min_separate_denominator;
         let trade_num = fees.trade_fee_numerator;
         let trade_den = fees.trade_fee_denominator;
-        
+
         assert_eq!(min_sep_num, 0);
         assert_eq!(min_sep_den, 0);
         assert_eq!(trade_num, 0);
@@ -593,7 +591,7 @@ mod tests {
         let pnl_coin = state_data.need_take_pnl_coin;
         let pnl_pc = state_data.need_take_pnl_pc;
         let open_time = state_data.pool_open_time;
-        
+
         assert_eq!(pnl_coin, 0);
         assert_eq!(pnl_pc, 0);
         assert_eq!(open_time, 0);
@@ -604,23 +602,23 @@ mod tests {
     fn test_realistic_pool_structure() {
         let mut data = vec![0u8; RaydiumDecoder::ACCOUNT_SIZE];
         let mut amm_info = AmmInfo::default();
-        
+
         // Set realistic values for a SOL/USDC pool
         amm_info.status = 6; // SwapOnly status
         amm_info.nonce = 255;
         amm_info.order_num = 10;
         amm_info.depth = 5;
-        amm_info.coin_decimals = 9;  // SOL
-        amm_info.pc_decimals = 6;    // USDC
+        amm_info.coin_decimals = 9; // SOL
+        amm_info.pc_decimals = 6; // USDC
         amm_info.state = 1; // IdleState
         amm_info.sys_decimal_value = 1_000_000_000; // 10^9
-        
+
         // Set fee structure (typical 0.25% = 25/10000)
         amm_info.fees.trade_fee_numerator = 25;
         amm_info.fees.trade_fee_denominator = 10000;
         amm_info.fees.swap_fee_numerator = 25;
         amm_info.fees.swap_fee_denominator = 10000;
-        
+
         // Set vault pubkeys
         amm_info.coin_vault = Pubkey::new_unique();
         amm_info.pc_vault = Pubkey::new_unique();
@@ -632,26 +630,26 @@ mod tests {
         amm_info.market_program = Pubkey::new_unique();
         amm_info.target_orders = Pubkey::new_unique();
         amm_info.amm_owner = Pubkey::new_unique();
-        
+
         // Copy to bytes
         let amm_bytes = bytemuck::bytes_of(&amm_info);
         data.copy_from_slice(amm_bytes);
-        
+
         let decoder = RaydiumDecoder;
-        
+
         // Should validate successfully
         assert!(decoder.validate_account(&data).is_ok());
-        
+
         // Should deserialize correctly
         let deserialized = RaydiumDecoder::deserialize_amm_info(&data).unwrap();
-        
+
         // Copy values to avoid packed struct alignment issues
         let status = deserialized.status;
         let coin_decimals = deserialized.coin_decimals;
         let pc_decimals = deserialized.pc_decimals;
         let trade_fee_num = deserialized.fees.trade_fee_numerator;
         let trade_fee_den = deserialized.fees.trade_fee_denominator;
-        
+
         assert_eq!(status, 6);
         assert_eq!(coin_decimals, 9);
         assert_eq!(pc_decimals, 6);
@@ -663,9 +661,9 @@ mod tests {
     fn test_vault_info_extraction() {
         let data = create_test_amm_info();
         let decoder = RaydiumDecoder;
-        
+
         let vault_info = decoder.get_vault_info(&data).unwrap();
-        
+
         // Verify vault info is extracted correctly
         assert_ne!(vault_info.coin_vault, Pubkey::default());
         assert_ne!(vault_info.pc_vault, Pubkey::default());
@@ -681,7 +679,7 @@ mod tests {
             coin_mint: Pubkey::new_unique(),
             pc_mint: Pubkey::new_unique(),
         };
-        
+
         let display = vault_info.display();
         assert!(display.contains("Coin vault:"));
         assert!(display.contains("PC vault:"));
@@ -693,13 +691,13 @@ mod tests {
     fn test_vault_info_from_amm_info() {
         let data = create_test_amm_info();
         let amm_info = RaydiumDecoder::deserialize_amm_info(&data).unwrap();
-        
+
         let vault_info = VaultInfo::from_amm_info(amm_info);
-        
+
         // Copy values from packed struct
         let coin_vault = amm_info.coin_vault;
         let pc_vault = amm_info.pc_vault;
-        
+
         assert_eq!(vault_info.coin_vault, coin_vault);
         assert_eq!(vault_info.pc_vault, pc_vault);
     }
