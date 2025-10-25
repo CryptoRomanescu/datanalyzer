@@ -34,6 +34,134 @@ impl PoolConfigToml {
     }
 }
 
+/// Configuration for CSV persistence
+#[derive(Debug, Clone, Deserialize)]
+pub struct PersistenceConfig {
+    /// Maximum file size in bytes before rotation (default: 10MB)
+    #[serde(default = "default_max_file_size")]
+    pub max_file_size_bytes: u64,
+    /// Maximum file age in seconds before rotation (default: 3600 = 1 hour)
+    #[serde(default = "default_max_file_age_secs")]
+    pub max_file_age_secs: u64,
+    /// Batch size: flush after N records (default: 100)
+    #[serde(default = "default_batch_size")]
+    pub batch_size: usize,
+    /// Batch time: flush after T milliseconds (default: 5000 = 5 seconds)
+    #[serde(default = "default_batch_time_ms")]
+    pub batch_time_ms: u64,
+}
+
+fn default_max_file_size() -> u64 {
+    10 * 1024 * 1024 // 10MB
+}
+
+fn default_max_file_age_secs() -> u64 {
+    3600 // 1 hour
+}
+
+fn default_batch_size() -> usize {
+    100
+}
+
+fn default_batch_time_ms() -> u64 {
+    5000 // 5 seconds
+}
+
+impl Default for PersistenceConfig {
+    fn default() -> Self {
+        Self {
+            max_file_size_bytes: default_max_file_size(),
+            max_file_age_secs: default_max_file_age_secs(),
+            batch_size: default_batch_size(),
+            batch_time_ms: default_batch_time_ms(),
+        }
+    }
+}
+
+/// Configuration for retry and backoff policies
+#[derive(Debug, Clone, Deserialize)]
+pub struct RetryConfig {
+    /// Maximum number of retry attempts (default: 3)
+    #[serde(default = "default_max_retries")]
+    pub max_retries: u32,
+    /// Initial backoff delay in milliseconds (default: 500)
+    #[serde(default = "default_initial_backoff_ms")]
+    pub initial_backoff_ms: u64,
+    /// Maximum backoff delay in milliseconds (default: 30000 = 30 seconds)
+    #[serde(default = "default_max_backoff_ms")]
+    pub max_backoff_ms: u64,
+}
+
+fn default_max_retries() -> u32 {
+    3
+}
+
+fn default_initial_backoff_ms() -> u64 {
+    500
+}
+
+fn default_max_backoff_ms() -> u64 {
+    30000
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: default_max_retries(),
+            initial_backoff_ms: default_initial_backoff_ms(),
+            max_backoff_ms: default_max_backoff_ms(),
+        }
+    }
+}
+
+/// Configuration for rate limiting
+#[derive(Debug, Clone, Deserialize)]
+pub struct RateLimitConfig {
+    /// Maximum requests per second (default: 10)
+    #[serde(default = "default_max_requests_per_sec")]
+    pub max_requests_per_sec: u32,
+    /// Minimum delay between requests in milliseconds (default: 100)
+    #[serde(default = "default_min_delay_ms")]
+    pub min_delay_ms: u64,
+}
+
+fn default_max_requests_per_sec() -> u32 {
+    10
+}
+
+fn default_min_delay_ms() -> u64 {
+    100
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            max_requests_per_sec: default_max_requests_per_sec(),
+            min_delay_ms: default_min_delay_ms(),
+        }
+    }
+}
+
+/// Configuration for price fetcher
+#[derive(Debug, Clone, Deserialize)]
+pub struct PriceFetcherConfig {
+    /// Cache TTL in seconds (default: 300 = 5 minutes)
+    #[serde(default = "default_cache_ttl_secs")]
+    pub cache_ttl_secs: u64,
+}
+
+fn default_cache_ttl_secs() -> u64 {
+    300
+}
+
+impl Default for PriceFetcherConfig {
+    fn default() -> Self {
+        Self {
+            cache_ttl_secs: default_cache_ttl_secs(),
+        }
+    }
+}
+
 /// Application configuration loaded from TOML
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
@@ -42,6 +170,14 @@ pub struct AppConfig {
     pub output_dir: String,
     pub snapshot_interval_ms: u64,
     pub pools: Vec<PoolConfigToml>,
+    #[serde(default)]
+    pub persistence: PersistenceConfig,
+    #[serde(default)]
+    pub retry: RetryConfig,
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
+    #[serde(default)]
+    pub price_fetcher: PriceFetcherConfig,
 }
 
 impl AppConfig {
@@ -143,6 +279,10 @@ impl AppConfig {
             output_dir: self.output_dir,
             snapshot_interval_ms: self.snapshot_interval_ms,
             pools: pools?,
+            persistence: self.persistence,
+            retry: self.retry,
+            rate_limit: self.rate_limit,
+            price_fetcher: self.price_fetcher,
         })
     }
 }
@@ -155,6 +295,10 @@ pub struct RuntimeConfig {
     pub output_dir: String,
     pub snapshot_interval_ms: u64,
     pub pools: Vec<PoolConfig>,
+    pub persistence: PersistenceConfig,
+    pub retry: RetryConfig,
+    pub rate_limit: RateLimitConfig,
+    pub price_fetcher: PriceFetcherConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -283,6 +427,27 @@ impl PoolConfigBuilder {
 mod tests {
     use super::*;
 
+    // Helper function to create test config with defaults
+    fn create_test_config(
+        rpc_url: &str,
+        rpc_ws_url: &str,
+        output_dir: &str,
+        snapshot_interval_ms: u64,
+        pools: Vec<PoolConfigToml>,
+    ) -> AppConfig {
+        AppConfig {
+            rpc_url: rpc_url.to_string(),
+            rpc_ws_url: rpc_ws_url.to_string(),
+            output_dir: output_dir.to_string(),
+            snapshot_interval_ms,
+            pools,
+            persistence: PersistenceConfig::default(),
+            retry: RetryConfig::default(),
+            rate_limit: RateLimitConfig::default(),
+            price_fetcher: PriceFetcherConfig::default(),
+        }
+    }
+
     #[test]
     fn test_pool_config_validation() {
         let result = PoolConfig::new(Pubkey::default(), DexType::Raydium, Pubkey::new_unique());
@@ -403,13 +568,7 @@ mod tests {
 
     #[test]
     fn test_app_config_validation_empty_rpc_url() {
-        let config = AppConfig {
-            rpc_url: "".to_string(),
-            rpc_ws_url: "wss://example.com".to_string(),
-            output_dir: "./output".to_string(),
-            snapshot_interval_ms: 1000,
-            pools: vec![],
-        };
+        let config = create_test_config("", "wss://example.com", "./output", 1000, vec![]);
 
         let result = config.validate();
         assert!(result.is_err());
@@ -419,13 +578,13 @@ mod tests {
 
     #[test]
     fn test_app_config_validation_invalid_rpc_url() {
-        let config = AppConfig {
-            rpc_url: "ftp://example.com".to_string(),
-            rpc_ws_url: "wss://example.com".to_string(),
-            output_dir: "./output".to_string(),
-            snapshot_interval_ms: 1000,
-            pools: vec![],
-        };
+        let config = create_test_config(
+            "ftp://example.com",
+            "wss://example.com",
+            "./output",
+            1000,
+            vec![],
+        );
 
         let result = config.validate();
         assert!(result.is_err());
@@ -435,13 +594,13 @@ mod tests {
 
     #[test]
     fn test_app_config_validation_invalid_ws_url() {
-        let config = AppConfig {
-            rpc_url: "https://example.com".to_string(),
-            rpc_ws_url: "http://example.com".to_string(),
-            output_dir: "./output".to_string(),
-            snapshot_interval_ms: 1000,
-            pools: vec![],
-        };
+        let config = create_test_config(
+            "https://example.com",
+            "http://example.com",
+            "./output",
+            1000,
+            vec![],
+        );
 
         let result = config.validate();
         assert!(result.is_err());
@@ -451,13 +610,7 @@ mod tests {
 
     #[test]
     fn test_app_config_validation_empty_output_dir() {
-        let config = AppConfig {
-            rpc_url: "https://example.com".to_string(),
-            rpc_ws_url: "wss://example.com".to_string(),
-            output_dir: "".to_string(),
-            snapshot_interval_ms: 1000,
-            pools: vec![],
-        };
+        let config = create_test_config("https://example.com", "wss://example.com", "", 1000, vec![]);
 
         let result = config.validate();
         assert!(result.is_err());
@@ -467,13 +620,13 @@ mod tests {
 
     #[test]
     fn test_app_config_validation_zero_interval() {
-        let config = AppConfig {
-            rpc_url: "https://example.com".to_string(),
-            rpc_ws_url: "wss://example.com".to_string(),
-            output_dir: "./output".to_string(),
-            snapshot_interval_ms: 0,
-            pools: vec![],
-        };
+        let config = create_test_config(
+            "https://example.com",
+            "wss://example.com",
+            "./output",
+            0,
+            vec![],
+        );
 
         let result = config.validate();
         assert!(result.is_err());
@@ -483,13 +636,13 @@ mod tests {
 
     #[test]
     fn test_app_config_validation_too_small_interval() {
-        let config = AppConfig {
-            rpc_url: "https://example.com".to_string(),
-            rpc_ws_url: "wss://example.com".to_string(),
-            output_dir: "./output".to_string(),
-            snapshot_interval_ms: 50,
-            pools: vec![],
-        };
+        let config = create_test_config(
+            "https://example.com",
+            "wss://example.com",
+            "./output",
+            50,
+            vec![],
+        );
 
         let result = config.validate();
         assert!(result.is_err());
@@ -499,13 +652,13 @@ mod tests {
 
     #[test]
     fn test_app_config_validation_no_pools() {
-        let config = AppConfig {
-            rpc_url: "https://example.com".to_string(),
-            rpc_ws_url: "wss://example.com".to_string(),
-            output_dir: "./output".to_string(),
-            snapshot_interval_ms: 1000,
-            pools: vec![],
-        };
+        let config = create_test_config(
+            "https://example.com",
+            "wss://example.com",
+            "./output",
+            1000,
+            vec![],
+        );
 
         let result = config.validate();
         assert!(result.is_err());
@@ -518,17 +671,17 @@ mod tests {
         let pool_addr = Pubkey::new_unique();
         let token_mint = Pubkey::new_unique();
 
-        let config = AppConfig {
-            rpc_url: "https://api.mainnet-beta.solana.com".to_string(),
-            rpc_ws_url: "wss://api.mainnet-beta.solana.com".to_string(),
-            output_dir: "./snapshots".to_string(),
-            snapshot_interval_ms: 5000,
-            pools: vec![PoolConfigToml {
+        let config = create_test_config(
+            "https://api.mainnet-beta.solana.com",
+            "wss://api.mainnet-beta.solana.com",
+            "./snapshots",
+            5000,
+            vec![PoolConfigToml {
                 pool_address: pool_addr.to_string(),
                 dex_type: "raydium".to_string(),
                 token_mint: token_mint.to_string(),
             }],
-        };
+        );
 
         let result = config.into_runtime_config();
         assert!(result.is_ok());
@@ -541,17 +694,17 @@ mod tests {
 
     #[test]
     fn test_app_config_runtime_invalid_pool() {
-        let config = AppConfig {
-            rpc_url: "https://api.mainnet-beta.solana.com".to_string(),
-            rpc_ws_url: "wss://api.mainnet-beta.solana.com".to_string(),
-            output_dir: "./snapshots".to_string(),
-            snapshot_interval_ms: 5000,
-            pools: vec![PoolConfigToml {
+        let config = create_test_config(
+            "https://api.mainnet-beta.solana.com",
+            "wss://api.mainnet-beta.solana.com",
+            "./snapshots",
+            5000,
+            vec![PoolConfigToml {
                 pool_address: "invalid".to_string(),
                 dex_type: "raydium".to_string(),
                 token_mint: Pubkey::new_unique().to_string(),
             }],
-        };
+        );
 
         let result = config.into_runtime_config();
         assert!(result.is_err());

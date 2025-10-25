@@ -30,7 +30,7 @@ impl Error for AppError {}
 
 impl From<io::Error> for AppError {
     fn from(error: io::Error) -> Self {
-        AppError::ConfigError(error.to_string())
+        AppError::IoError(error.to_string())
     }
 }
 
