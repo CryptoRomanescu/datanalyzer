@@ -37,7 +37,6 @@
 ///
 /// This decoder extracts the vault pubkeys. Fetching actual balances requires
 /// an async RPC client, which is beyond the scope of this synchronous decoder trait.
-
 use crate::dex::DexDecoder;
 use crate::error::AppError;
 use bytemuck::{Pod, Zeroable};

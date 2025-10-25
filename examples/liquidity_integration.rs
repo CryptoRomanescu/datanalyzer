@@ -1,9 +1,9 @@
-/// Example demonstrating liquidity calculation integration.
+/// Example demonstrating liquidity calculation integration with CoinGecko price fetching.
 ///
 /// This example shows how to:
-/// 1. Extract token mint from pool config
-/// 2. Fetch prices using PriceFetcher
-/// 3. Calculate liquidity using calculate_liquidity_usd
+/// 1. Create PriceFetcher with Duration-based TTL
+/// 2. Use CoinGecko token IDs instead of Pubkey
+/// 3. Fetch prices and calculate liquidity
 /// 4. Handle errors when price fetching fails
 /// 5. Store results in PoolSnapshot
 
@@ -16,10 +16,26 @@ use datanalyzer::{
 };
 use solana_sdk::pubkey::Pubkey;
 use std::collections::HashMap;
+use std::time::Duration;
+
+/// Example placeholder mapping from mint address to CoinGecko token ID
+/// In production, this would be a more comprehensive mapping or lookup service
+fn get_coingecko_id(mint: &Pubkey) -> Option<&'static str> {
+    // This is a placeholder mapping. In production, you would maintain
+    // a proper database or mapping service for mint -> token_id
+    let mint_str = mint.to_string();
+    
+    // Example mappings (these are illustrative only)
+    if mint_str == "So11111111111111111111111111111111111111112" {
+        Some("solana")
+    } else {
+        // For other tokens, you'd need actual mappings
+        // For this example, we'll use None to simulate unknown tokens
+        None
+    }
+}
 
 /// Example processing function that integrates all components.
-///
-/// This demonstrates the main processing loop mentioned in Task 10.4.
 async fn process_pool_with_liquidity(
     pool_config: &PoolConfig,
     reserve_base: u64,
@@ -31,40 +47,44 @@ async fn process_pool_with_liquidity(
     let token_mint = *pool_config.token_mint();
     let pool_address = pool_config.pool_address().to_string();
     
-    // Step 2: Get the wrapped SOL mint address
-    // In production, this would be a constant or configuration value
-    let sol_mint = "So11111111111111111111111111111111111111112"
-        .parse::<Pubkey>()
-        .map_err(|e| AppError::ConfigError(format!("Invalid SOL mint: {}", e)))?;
+    // Step 2: Get CoinGecko token IDs
+    let sol_token_id = "solana"; // SOL is always "solana" on CoinGecko
+    let token_id = get_coingecko_id(&token_mint);
     
-    // Step 3: Fetch token decimals (with caching)
-    let token_decimals = price_fetcher.get_token_decimals(&token_mint).await?;
+    println!("Token mint: {}", token_mint);
     
-    println!("Token decimals for {}: {}", token_mint, token_decimals);
-    
-    // Step 4: Call price_fetcher.fetch_prices([SOL, token_mint])
-    let mints_to_fetch = vec![sol_mint, token_mint];
+    // Step 3: Fetch prices using CoinGecko token IDs
+    let mut token_ids = vec![sol_token_id.to_string()];
+    if let Some(tid) = token_id {
+        token_ids.push(tid.to_string());
+    }
     
     // Try to fetch prices, handle failure case
-    let prices = match price_fetcher.fetch_prices(&mints_to_fetch).await {
+    let prices = match price_fetcher.fetch_prices(&token_ids).await {
         Ok(prices) => prices,
         Err(e) => {
             log::warn!("Failed to fetch prices: {}. Using fallback values.", e);
             // Handle case when fetch prices fails (use default values or skip USD calculation)
             let mut fallback_prices = HashMap::new();
-            fallback_prices.insert(sol_mint, 0.0);
-            fallback_prices.insert(token_mint, 0.0);
+            fallback_prices.insert(sol_token_id.to_string(), 0.0);
+            if let Some(tid) = token_id {
+                fallback_prices.insert(tid.to_string(), 0.0);
+            }
             fallback_prices
         }
     };
     
     // Extract individual prices
-    let sol_price = prices.get(&sol_mint).copied().unwrap_or(0.0);
-    let token_price = prices.get(&token_mint).copied().unwrap_or(0.0);
+    let sol_price = prices.get(sol_token_id).copied().unwrap_or(0.0);
+    let token_price = if let Some(tid) = token_id {
+        prices.get(tid).copied().unwrap_or(0.0)
+    } else {
+        0.0
+    };
     
     println!("Fetched prices - SOL: ${}, Token: ${}", sol_price, token_price);
     
-    // Step 5: Calculate liquidity USD
+    // Step 4: Calculate liquidity USD
     // Important: DEX conventions vary, but typically:
     // - PumpFun: reserve_base = token, reserve_quote = SOL
     // - Raydium: reserve_base = coin (often token), reserve_quote = PC (often SOL)
@@ -72,9 +92,11 @@ async fn process_pool_with_liquidity(
     //   (sol_reserves, token_reserves, sol_price, token_price, token_decimals)
     // So we need to identify which reserve is SOL and which is token
     
+    // For simplicity, assume 9 decimals (SOL standard)
+    let token_decimals = 9u8;
+    
     let liquidity_usd = if sol_price > 0.0 || token_price > 0.0 {
         // For this example, we assume reserve_quote is SOL and reserve_base is token
-        // In production, you would determine this based on the pool's mint configuration
         let sol_reserves = reserve_quote;
         let token_reserves = reserve_base;
         
@@ -105,7 +127,7 @@ async fn process_pool_with_liquidity(
         None
     };
     
-    // Step 6: Calculate token price (for backward compatibility)
+    // Step 5: Calculate token price (for backward compatibility)
     // Price is typically quote/base (e.g., SOL per token)
     let price = if reserve_base > 0 {
         reserve_quote as f64 / reserve_base as f64
@@ -113,7 +135,7 @@ async fn process_pool_with_liquidity(
         0.0
     };
     
-    // Step 7: Create and save result in PoolSnapshot structure
+    // Step 6: Create and save result in PoolSnapshot structure
     let snapshot = if let Some(liquidity) = liquidity_usd {
         PoolSnapshot::with_liquidity(
             pool_address,
@@ -145,8 +167,8 @@ async fn process_pool_with_liquidity(
 async fn example_processing_loop() -> Result<(), AppError> {
     println!("=== Liquidity Calculation Integration Example ===\n");
     
-    // Initialize PriceFetcher
-    let price_fetcher = PriceFetcher::new("https://api.mainnet-beta.solana.com");
+    // Initialize PriceFetcher with 5-minute TTL cache
+    let price_fetcher = PriceFetcher::new(Duration::from_secs(300));
     
     // Create example pool configs
     let pool_configs = vec![
@@ -208,9 +230,14 @@ async fn example_processing_loop() -> Result<(), AppError> {
         }
     }
     
-    // Show cache statistics
-    println!("\n=== PriceFetcher Cache Statistics ===");
-    println!("Cached decimals count: {}", price_fetcher.cache_size());
+    // Show metrics
+    println!("\n=== PriceFetcher Metrics ===");
+    let metrics = price_fetcher.get_metrics().await;
+    println!("Total requests: {}", metrics.total_requests);
+    println!("Successful requests: {}", metrics.successful_requests);
+    println!("Failed requests: {}", metrics.failed_requests);
+    println!("Success rate: {:.2}%", metrics.success_rate());
+    println!("Avg response time: {:.2}ms", metrics.avg_response_time_ms());
     
     Ok(())
 }
@@ -219,7 +246,7 @@ async fn example_processing_loop() -> Result<(), AppError> {
 async fn example_error_handling() -> Result<(), AppError> {
     println!("\n=== Error Handling Example ===\n");
     
-    let price_fetcher = PriceFetcher::new("https://api.mainnet-beta.solana.com");
+    let price_fetcher = PriceFetcher::new(Duration::from_secs(300));
     
     let pool_config = PoolConfig::builder()
         .pool_address_pubkey(Pubkey::new_unique())
@@ -247,7 +274,7 @@ async fn example_error_handling() -> Result<(), AppError> {
 async fn example_zero_reserves() -> Result<(), AppError> {
     println!("\n=== Zero Reserves Example ===\n");
     
-    let price_fetcher = PriceFetcher::new("https://api.mainnet-beta.solana.com");
+    let price_fetcher = PriceFetcher::new(Duration::from_secs(300));
     
     let pool_config = PoolConfig::builder()
         .pool_address_pubkey(Pubkey::new_unique())
@@ -255,7 +282,7 @@ async fn example_zero_reserves() -> Result<(), AppError> {
         .token_mint_pubkey(Pubkey::new_unique())
         .build()?;
     
-    // Empty pool with zero reserves - this is valid per Task 10.3
+    // Empty pool with zero reserves - this is valid
     let snapshot = process_pool_with_liquidity(
         &pool_config,
         0,  // No tokens

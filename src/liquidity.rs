@@ -2,7 +2,6 @@
 ///
 /// This module provides functionality to calculate total liquidity in USD
 /// for liquidity pools, handling decimal conversions and validation.
-
 use crate::error::AppError;
 
 /// SOL has 9 decimals (1 SOL = 1,000,000,000 lamports)

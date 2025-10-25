@@ -40,7 +40,6 @@
 ///
 /// Expected account size: 256 bytes (as defined in models.rs)
 /// The discriminator at offset 0x00 can be used for additional validation if needed.
-
 use crate::dex::DexDecoder;
 use crate::error::AppError;
 
@@ -63,9 +62,6 @@ impl PumpFunDecoder {
 
     /// Size of a u64 field in bytes.
     const U64_SIZE: usize = 8;
-
-    /// Minimum reasonable reserve value (1 lamport/smallest unit).
-    const MIN_RESERVE_VALUE: u64 = 1;
 
     /// Maximum reasonable reserve value (to detect corrupted data).
     /// Set to 1 trillion tokens/SOL in base units.

@@ -3,7 +3,6 @@
 /// This module provides traits and implementations for decoding various DEX
 /// pool account structures on Solana. Each DEX has its own data layout,
 /// and this module abstracts the decoding logic behind a common interface.
-
 pub mod pumpfun;
 pub mod raydium;
 

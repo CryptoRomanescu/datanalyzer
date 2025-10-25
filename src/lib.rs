@@ -1,7 +1,6 @@
 /// Datanalyzer - Solana DEX Pool Monitor Library
 ///
 /// This library provides tools for decoding and monitoring Solana DEX pools.
-
 pub mod config;
 pub mod dex;
 pub mod error;

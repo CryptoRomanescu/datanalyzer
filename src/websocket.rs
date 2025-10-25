@@ -655,6 +655,7 @@ impl WebSocketManager {
     ///
     /// * `true` - If notification should be processed
     /// * `false` - If notification should be skipped due to throttling
+    #[allow(dead_code)]
     async fn should_process_notification(&self, pool_address: &Pubkey) -> bool {
         // If throttling is disabled (0), always process
         if self.snapshot_interval_ms == 0 {

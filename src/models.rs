@@ -77,6 +77,7 @@ impl PoolSnapshot {
     }
 
     /// Create a new snapshot with liquidity information
+    #[allow(clippy::too_many_arguments)]
     pub fn with_liquidity(
         pool_address: String,
         token_mint: String,
