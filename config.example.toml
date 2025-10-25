@@ -52,6 +52,18 @@ min_delay_ms = 100
 # Cache TTL in seconds (default: 300 = 5 minutes)
 cache_ttl_secs = 300
 
+# Token mapping: Solana mint address to CoinGecko token ID
+[[token_mapping]]
+mint = "So11111111111111111111111111111111111111112"
+coingecko_id = "solana"
+# Optional: Custom cache TTL for this specific token (in seconds)
+cache_ttl_secs = 300
+
+[[token_mapping]]
+mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+coingecko_id = "usd-coin"
+cache_ttl_secs = 600
+
 # Pool configurations
 [[pools]]
 pool_address = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"

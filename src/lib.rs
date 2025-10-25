@@ -11,6 +11,9 @@ pub mod metrics;
 pub mod models;
 pub mod orchestrator;
 pub mod price_fetcher;
+pub mod price_provider;
+pub mod token_mapping;
+pub mod token_metadata;
 pub mod websocket;
 
 // Re-export commonly used types
@@ -26,4 +29,10 @@ pub use metrics::WebSocketMetrics;
 pub use models::{DexType, PoolSnapshot};
 pub use orchestrator::{ReserveInfo, ReserveOrchestrator};
 pub use price_fetcher::{CachedPrice, PriceFetcher, PriceFetcherMetrics};
+pub use price_provider::{
+    CircuitBreaker, CircuitBreakerState, CoinGeckoPriceProvider, FallbackPriceProvider,
+    JupiterPriceProvider, PriceProvider,
+};
+pub use token_mapping::{StaticTokenMapping, TokenMappingEntry, TokenMappingProvider, TokenMappingService};
+pub use token_metadata::{CachedMetadata, TokenMetadata, TokenMetadataProvider};
 pub use websocket::{ReconnectStrategy, WebSocketManager};
