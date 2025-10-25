@@ -336,6 +336,24 @@ impl RaydiumDecoder {
         let amm_info = Self::deserialize_amm_info(account_data)?;
         Ok(VaultInfo::from_amm_info(amm_info))
     }
+
+    /// Decode reserve information from account data.
+    ///
+    /// This method returns ReserveInfo which indicates that vault accounts
+    /// need to be fetched to get actual reserves.
+    ///
+    /// # Arguments
+    ///
+    /// * `account_data` - Raw account data bytes from Solana
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(ReserveInfo)` - Reserve information (RequiresVaults variant)
+    /// * `Err(AppError)` - If data is invalid
+    pub fn decode_reserve_info(&self, account_data: &[u8]) -> Result<crate::orchestrator::ReserveInfo, AppError> {
+        let vault_info = self.get_vault_info(account_data)?;
+        Ok(crate::orchestrator::ReserveInfo::RequiresVaults(vault_info))
+    }
 }
 
 impl DexDecoder for RaydiumDecoder {
@@ -700,5 +718,80 @@ mod tests {
 
         assert_eq!(vault_info.coin_vault, coin_vault);
         assert_eq!(vault_info.pc_vault, pc_vault);
+    }
+
+    #[test]
+    fn test_decode_reserve_info() {
+        let decoder = RaydiumDecoder;
+        let data = create_test_amm_info();
+
+        let reserve_info = decoder.decode_reserve_info(&data).unwrap();
+
+        match reserve_info {
+            crate::orchestrator::ReserveInfo::RequiresVaults(vault_info) => {
+                // Verify we got vault info
+                assert_ne!(vault_info.coin_vault, Pubkey::default());
+                assert_ne!(vault_info.pc_vault, Pubkey::default());
+                assert_ne!(vault_info.coin_mint, Pubkey::default());
+                assert_ne!(vault_info.pc_mint, Pubkey::default());
+            }
+            _ => panic!("Expected RequiresVaults variant for Raydium"),
+        }
+    }
+
+    #[test]
+    fn test_amm_info_alignment() {
+        // Verify that AmmInfo has proper alignment for packed struct
+        assert_eq!(std::mem::align_of::<AmmInfo>(), 1);
+    }
+
+    #[test]
+    fn test_fees_alignment() {
+        // Verify Fees alignment
+        assert_eq!(std::mem::align_of::<Fees>(), 1);
+    }
+
+    #[test]
+    fn test_state_data_alignment() {
+        // Verify StateData alignment
+        assert_eq!(std::mem::align_of::<StateData>(), 1);
+    }
+
+    #[test]
+    fn test_amm_info_pod_safe() {
+        // Verify that AmmInfo can be safely used with bytemuck
+        fn assert_pod<T: bytemuck::Pod>() {}
+        assert_pod::<AmmInfo>();
+        assert_pod::<Fees>();
+        assert_pod::<StateData>();
+    }
+
+    #[test]
+    fn test_field_offsets() {
+        // Test that we can correctly access fields at specific offsets
+        let data = create_test_amm_info();
+        let amm_info = RaydiumDecoder::deserialize_amm_info(&data).unwrap();
+
+        // Verify critical field positions by checking we can read them
+        let status = amm_info.status;
+        let coin_vault = amm_info.coin_vault;
+        let pc_vault = amm_info.pc_vault;
+
+        assert_eq!(status, 1);
+        assert_ne!(coin_vault, Pubkey::default());
+        assert_ne!(pc_vault, Pubkey::default());
+    }
+
+    #[test]
+    fn test_pubkey_is_pod_safe() {
+        // Verify that Pubkey itself is Pod-safe
+        fn assert_pod<T: bytemuck::Pod>() {}
+        assert_pod::<Pubkey>();
+        
+        // Verify Pubkey size is 32 bytes
+        assert_eq!(std::mem::size_of::<Pubkey>(), 32);
+        
+        // Verify Pubkey alignment is 1 (can be used in packed structs)
+        assert_eq!(std::mem::align_of::<Pubkey>(), 1);
     }
 }
