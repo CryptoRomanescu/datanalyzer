@@ -1,5 +1,6 @@
 use crate::error::AppError;
 use crate::models::DexType;
+use crate::token_mapping::TokenMappingEntry;
 use serde::Deserialize;
 use solana_sdk::pubkey::Pubkey;
 use std::fs;
@@ -178,6 +179,8 @@ pub struct AppConfig {
     pub rate_limit: RateLimitConfig,
     #[serde(default)]
     pub price_fetcher: PriceFetcherConfig,
+    #[serde(default)]
+    pub token_mapping: Vec<TokenMappingEntry>,
 }
 
 impl AppConfig {
@@ -283,6 +286,7 @@ impl AppConfig {
             retry: self.retry,
             rate_limit: self.rate_limit,
             price_fetcher: self.price_fetcher,
+            token_mapping: self.token_mapping,
         })
     }
 }
@@ -299,6 +303,7 @@ pub struct RuntimeConfig {
     pub retry: RetryConfig,
     pub rate_limit: RateLimitConfig,
     pub price_fetcher: PriceFetcherConfig,
+    pub token_mapping: Vec<TokenMappingEntry>,
 }
 
 #[derive(Debug, Clone)]
@@ -445,6 +450,7 @@ mod tests {
             retry: RetryConfig::default(),
             rate_limit: RateLimitConfig::default(),
             price_fetcher: PriceFetcherConfig::default(),
+            token_mapping: vec![],
         }
     }
 

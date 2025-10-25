@@ -1078,6 +1078,7 @@ name = "datanalyzer"
 version = "0.1.0"
 dependencies = [
  "arrayref",
+ "async-trait",
  "axum",
  "bytemuck",
  "chrono",
