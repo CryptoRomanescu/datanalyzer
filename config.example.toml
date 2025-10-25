@@ -1,0 +1,64 @@
+# Datanalyzer Configuration Example
+# 
+# This file demonstrates all available configuration options for the datanalyzer application.
+
+# RPC endpoint for Solana blockchain queries
+rpc_url = "https://api.mainnet-beta.solana.com"
+
+# WebSocket endpoint for real-time Solana updates
+rpc_ws_url = "wss://api.mainnet-beta.solana.com"
+
+# Directory where CSV files will be written
+output_dir = "./snapshots"
+
+# Interval between snapshots in milliseconds
+snapshot_interval_ms = 5000
+
+# Persistence configuration
+[persistence]
+# Maximum file size in bytes before rotation (default: 10MB)
+max_file_size_bytes = 10485760
+
+# Maximum file age in seconds before rotation (default: 3600 = 1 hour)
+max_file_age_secs = 3600
+
+# Number of records to buffer before flushing (default: 100)
+batch_size = 100
+
+# Time in milliseconds before auto-flush (default: 5000 = 5 seconds)
+batch_time_ms = 5000
+
+# Retry configuration for transient errors
+[retry]
+# Maximum number of retry attempts (default: 3)
+max_retries = 3
+
+# Initial backoff delay in milliseconds (default: 500)
+initial_backoff_ms = 500
+
+# Maximum backoff delay in milliseconds (default: 30000 = 30 seconds)
+max_backoff_ms = 30000
+
+# Rate limiting configuration
+[rate_limit]
+# Maximum requests per second (default: 10)
+max_requests_per_sec = 10
+
+# Minimum delay between requests in milliseconds (default: 100)
+min_delay_ms = 100
+
+# Price fetcher configuration
+[price_fetcher]
+# Cache TTL in seconds (default: 300 = 5 minutes)
+cache_ttl_secs = 300
+
+# Pool configurations
+[[pools]]
+pool_address = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"
+dex_type = "raydium"
+token_mint = "So11111111111111111111111111111111111111112"
+
+[[pools]]
+pool_address = "CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM"
+dex_type = "pumpfun"
+token_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
