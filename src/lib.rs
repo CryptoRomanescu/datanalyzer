@@ -20,4 +20,4 @@ pub use metrics::WebSocketMetrics;
 pub use models::{DexType, PoolSnapshot};
 pub use orchestrator::{ReserveInfo, ReserveOrchestrator};
 pub use price_fetcher::{CachedPrice, PriceFetcher, PriceFetcherMetrics};
-pub use websocket::WebSocketManager;
+pub use websocket::{ReconnectStrategy, WebSocketManager};
