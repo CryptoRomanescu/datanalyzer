@@ -781,4 +781,140 @@ rpc_ws_url = "wss://api.mainnet-beta.solana.com
         // Cleanup
         std::fs::remove_file(temp_path).ok();
     }
+
+    #[test]
+    fn test_persistence_config_defaults() {
+        let config = PersistenceConfig::default();
+        assert_eq!(config.max_file_size_bytes, 10 * 1024 * 1024);
+        assert_eq!(config.max_file_age_secs, 3600);
+        assert_eq!(config.batch_size, 100);
+        assert_eq!(config.batch_time_ms, 5000);
+    }
+
+    #[test]
+    fn test_retry_config_defaults() {
+        let config = RetryConfig::default();
+        assert_eq!(config.max_retries, 3);
+        assert_eq!(config.initial_backoff_ms, 500);
+        assert_eq!(config.max_backoff_ms, 30000);
+    }
+
+    #[test]
+    fn test_rate_limit_config_defaults() {
+        let config = RateLimitConfig::default();
+        assert_eq!(config.max_requests_per_sec, 10);
+        assert_eq!(config.min_delay_ms, 100);
+    }
+
+    #[test]
+    fn test_price_fetcher_config_defaults() {
+        let config = PriceFetcherConfig::default();
+        assert_eq!(config.cache_ttl_secs, 300);
+    }
+
+    #[test]
+    fn test_app_config_with_custom_configs() {
+        use std::io::Write;
+
+        let pool_addr = Pubkey::new_unique();
+        let token_mint = Pubkey::new_unique();
+
+        let toml_content = format!(
+            r#"
+rpc_url = "https://api.mainnet-beta.solana.com"
+rpc_ws_url = "wss://api.mainnet-beta.solana.com"
+output_dir = "./snapshots"
+snapshot_interval_ms = 5000
+
+[persistence]
+max_file_size_bytes = 20971520
+max_file_age_secs = 7200
+batch_size = 200
+batch_time_ms = 10000
+
+[retry]
+max_retries = 5
+initial_backoff_ms = 1000
+max_backoff_ms = 60000
+
+[rate_limit]
+max_requests_per_sec = 20
+min_delay_ms = 50
+
+[price_fetcher]
+cache_ttl_secs = 600
+
+[[pools]]
+pool_address = "{}"
+dex_type = "raydium"
+token_mint = "{}"
+"#,
+            pool_addr, token_mint
+        );
+
+        let temp_path = "/tmp/test_custom_config.toml";
+        let mut file = std::fs::File::create(temp_path).unwrap();
+        file.write_all(toml_content.as_bytes()).unwrap();
+
+        let config = AppConfig::load(temp_path).unwrap();
+        assert_eq!(config.persistence.max_file_size_bytes, 20971520);
+        assert_eq!(config.persistence.max_file_age_secs, 7200);
+        assert_eq!(config.persistence.batch_size, 200);
+        assert_eq!(config.persistence.batch_time_ms, 10000);
+
+        assert_eq!(config.retry.max_retries, 5);
+        assert_eq!(config.retry.initial_backoff_ms, 1000);
+        assert_eq!(config.retry.max_backoff_ms, 60000);
+
+        assert_eq!(config.rate_limit.max_requests_per_sec, 20);
+        assert_eq!(config.rate_limit.min_delay_ms, 50);
+
+        assert_eq!(config.price_fetcher.cache_ttl_secs, 600);
+
+        std::fs::remove_file(temp_path).ok();
+    }
+
+    #[test]
+    fn test_app_config_with_partial_configs() {
+        use std::io::Write;
+
+        let pool_addr = Pubkey::new_unique();
+        let token_mint = Pubkey::new_unique();
+
+        // Only override some config sections, rest should use defaults
+        let toml_content = format!(
+            r#"
+rpc_url = "https://api.mainnet-beta.solana.com"
+rpc_ws_url = "wss://api.mainnet-beta.solana.com"
+output_dir = "./snapshots"
+snapshot_interval_ms = 5000
+
+[persistence]
+batch_size = 250
+
+[[pools]]
+pool_address = "{}"
+dex_type = "raydium"
+token_mint = "{}"
+"#,
+            pool_addr, token_mint
+        );
+
+        let temp_path = "/tmp/test_partial_config.toml";
+        let mut file = std::fs::File::create(temp_path).unwrap();
+        file.write_all(toml_content.as_bytes()).unwrap();
+
+        let config = AppConfig::load(temp_path).unwrap();
+        
+        // Custom value
+        assert_eq!(config.persistence.batch_size, 250);
+        
+        // Default values
+        assert_eq!(config.persistence.max_file_size_bytes, 10 * 1024 * 1024);
+        assert_eq!(config.retry.max_retries, 3);
+        assert_eq!(config.rate_limit.max_requests_per_sec, 10);
+        assert_eq!(config.price_fetcher.cache_ttl_secs, 300);
+
+        std::fs::remove_file(temp_path).ok();
+    }
 }
