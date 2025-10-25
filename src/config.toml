@@ -1,0 +1,48 @@
+# Solana RPC Configuration
+rpc_url = "https://mainnet.helius-rpc.com/?api-key=d1add126-fcbf-4856-935a-0f609eec91bc"
+ws_url = "wss://mainnet.helius-rpc.com/?api-key=d1add126-fcbf-4856-935a-0f609eec91bc"
+
+# Monitoring Configuration
+snapshot_interval_ms = 60000  # 1 minute
+
+# CSV Output
+csv_file_path = "./data/pools.csv"
+
+# Price Fetcher
+[price_fetcher]
+cache_ttl_secs = 300  # 5 minutes
+
+# Token Mapping (mint -> CoinGecko ID)
+[[token_mapping]]
+mint = "So11111111111111111111111111111111111111112"
+coingecko_id = "solana"
+cache_ttl_secs = 600
+
+[[token_mapping]]
+mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+coingecko_id = "usd-coin"
+cache_ttl_secs = 600
+
+# Pools to Monitor
+[[pools]]
+address = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"  # SOL/USDC Raydium
+dex_type = "raydium"
+
+[[pools]]
+address = "7YttLkHDoNj9wyDur5pM1ejNaAvT9X4eqaYcHQqtj2G5"  # Example Pump.fun
+dex_type = "pumpfun"
+
+# Health Check
+[healthcheck]
+host = "127.0.0.1"
+port = 8080
+
+# Metrics
+[metrics]
+host = "127.0.0.1"
+port = 9090
+
+# Throttling (optional)
+[throttle]
+updates_per_second = 10.0
+bucket_size = 10
