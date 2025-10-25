@@ -310,10 +310,12 @@ cargo test --test performance_tests -- --test-threads=1
 
 ### Test Coverage
 
-- **247 Total Tests**
+- **260 Total Tests**
   - 218 Unit tests
-  - 21 Integration tests  
+  - 21 Integration tests (Stage 4)
   - 8 Performance tests
+  - 11 Observability tests
+  - 2 Documentation tests
 
 ## Performance Characteristics
 

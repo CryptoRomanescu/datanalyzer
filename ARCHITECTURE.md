@@ -820,12 +820,12 @@ match risky_operation() {
 ### Scalability Roadmap
 
 ```
-Current:
+Current (Q4 2025):
 ┌──────────────┐
 │  Single Node │  → 100s of pools
 └──────────────┘
 
-Phase 1 (Q2 2025):
+Phase 1 (Q2 2026):
 ┌──────────────┐  ┌──────────────┐
 │  Node 1      │  │  Node 2      │  → 1000s of pools
 │  (Pools 1-N) │  │  (Pools N+1..│
@@ -837,7 +837,7 @@ Phase 1 (Q2 2025):
          │  PostgreSQL  │
          └──────────────┘
 
-Phase 2 (Q4 2025):
+Phase 2 (Q4 2026):
          ┌──────────────┐
          │ Load Balancer│
          └──────┬───────┘
