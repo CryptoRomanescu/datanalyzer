@@ -2,7 +2,6 @@
 ///
 /// This module provides functionality to calculate total liquidity in USD
 /// for liquidity pools, handling decimal conversions and validation.
-
 use crate::error::AppError;
 
 /// SOL has 9 decimals (1 SOL = 1,000,000,000 lamports)
@@ -175,7 +174,8 @@ pub fn check_liquidity_change(
         return;
     }
 
-    let change_percent = ((current_liquidity - previous_liquidity) / previous_liquidity).abs() * 100.0;
+    let change_percent =
+        ((current_liquidity - previous_liquidity) / previous_liquidity).abs() * 100.0;
 
     if change_percent > threshold_percent {
         log::warn!(
@@ -195,13 +195,13 @@ mod tests {
     fn test_convert_to_full_units() {
         // 1 SOL = 1,000,000,000 lamports
         assert_eq!(convert_to_full_units(1_000_000_000, 9), 1.0);
-        
+
         // 10.5 SOL
         assert_eq!(convert_to_full_units(10_500_000_000, 9), 10.5);
-        
+
         // 1000 USDC (6 decimals) = 1,000,000,000 smallest units
         assert_eq!(convert_to_full_units(1_000_000_000, 6), 1000.0);
-        
+
         // 0.5 USDC
         assert_eq!(convert_to_full_units(500_000, 6), 0.5);
     }
@@ -218,13 +218,13 @@ mod tests {
     fn test_calculate_liquidity_usd_basic() {
         // Pool with 10 SOL and 1000 USDC
         let result = calculate_liquidity_usd(
-            10_000_000_000,  // 10 SOL
-            1_000_000_000,   // 1000 USDC (6 decimals)
-            100.0,           // SOL = $100
-            1.0,             // USDC = $1
+            10_000_000_000, // 10 SOL
+            1_000_000_000,  // 1000 USDC (6 decimals)
+            100.0,          // SOL = $100
+            1.0,            // USDC = $1
             6,
         );
-        
+
         assert!(result.is_ok());
         let liquidity = result.unwrap();
         // (10 * 100) + (1000 * 1) = 2000
@@ -241,7 +241,7 @@ mod tests {
             2.0,             // Token = $2
             9,
         );
-        
+
         assert!(result.is_ok());
         let liquidity = result.unwrap();
         // (5 * 150) + (500 * 2) = 750 + 1000 = 1750
@@ -252,7 +252,7 @@ mod tests {
     fn test_calculate_liquidity_usd_zero_reserves() {
         // Empty pool (valid state)
         let result = calculate_liquidity_usd(0, 0, 100.0, 1.0, 6);
-        
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 0.0);
     }
@@ -267,7 +267,7 @@ mod tests {
             1.0,
             6,
         );
-        
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 1000.0); // 10 * 100
     }
@@ -282,7 +282,7 @@ mod tests {
             1.234,         // USDC price with decimals
             6,
         );
-        
+
         assert!(result.is_ok());
         let liquidity = result.unwrap();
         // (1.23456789 * 100.567) + (5.678901 * 1.234) ≈ 124.14 + 7.01 = 131.15
@@ -356,7 +356,7 @@ mod tests {
             1.0,
             6,
         );
-        
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 300_000.0);
     }
@@ -364,13 +364,13 @@ mod tests {
     #[test]
     fn test_calculate_liquidity_different_token_decimals() {
         // Test with various decimal configurations
-        
+
         // 8 decimals (like WBTC)
         let result = calculate_liquidity_usd(
             10_000_000_000, // 10 SOL
             100_000_000,    // 1 token with 8 decimals
             100.0,
-            50_000.0,       // Expensive token like BTC
+            50_000.0, // Expensive token like BTC
             8,
         );
         assert!(result.is_ok());

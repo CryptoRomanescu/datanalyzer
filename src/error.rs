@@ -1,14 +1,16 @@
-use std::fmt;
 use std::error::Error;
+use std::fmt;
 use std::io;
 
 #[derive(Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum AppError {
     ConfigError(String),
     RpcError(String),
     DecodingError(String),
     CsvError(String),
     PriceError(String),
+    IoError(String),
 }
 
 impl fmt::Display for AppError {
@@ -19,6 +21,7 @@ impl fmt::Display for AppError {
             AppError::DecodingError(msg) => write!(f, "Decoding error: {}", msg),
             AppError::CsvError(msg) => write!(f, "CSV error: {}", msg),
             AppError::PriceError(msg) => write!(f, "Price error: {}", msg),
+            AppError::IoError(msg) => write!(f, "I/O error: {}", msg),
         }
     }
 }

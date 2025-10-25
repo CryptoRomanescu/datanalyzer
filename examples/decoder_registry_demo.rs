@@ -5,7 +5,6 @@
 /// 2. Use the decoder registry with multiple pools
 /// 3. Lazy initialization
 /// 4. Track and view statistics
-
 use datanalyzer::config::PoolConfig;
 use datanalyzer::dex::{create_decoder, DecoderRegistry};
 use datanalyzer::models::DexType;
@@ -81,10 +80,7 @@ fn demo_registry_immediate() -> Result<(), Box<dyn std::error::Error>> {
 
     // Decode using registry
     let (token, sol) = registry.decode_pool_data(&pool1_addr, &pool1_data)?;
-    println!(
-        "Decoded pool1: {} tokens, {} lamports SOL\n",
-        token, sol
-    );
+    println!("Decoded pool1: {} tokens, {} lamports SOL\n", token, sol);
 
     Ok(())
 }

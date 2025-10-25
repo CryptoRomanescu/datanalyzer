@@ -1,9 +1,8 @@
 /// DEX decoder module for parsing liquidity pool account data.
-/// 
+///
 /// This module provides traits and implementations for decoding various DEX
 /// pool account structures on Solana. Each DEX has its own data layout,
 /// and this module abstracts the decoding logic behind a common interface.
-
 pub mod pumpfun;
 pub mod raydium;
 
@@ -128,16 +127,16 @@ pub fn create_decoder(dex_type: DexType) -> Box<dyn DexDecoder> {
 pub struct DecoderStats {
     /// Number of successful decodings
     pub success_count: u64,
-    
+
     /// Number of failed decodings
     pub error_count: u64,
-    
+
     /// Timestamp of first successful decode (Unix epoch seconds)
     pub first_success_time: Option<u64>,
-    
+
     /// Timestamp of last successful decode (Unix epoch seconds)
     pub last_success_time: Option<u64>,
-    
+
     /// Timestamp of last error (Unix epoch seconds)
     pub last_error_time: Option<u64>,
 }
@@ -152,7 +151,7 @@ impl DecoderStats {
     pub fn record_success(&mut self) {
         self.success_count += 1;
         let now = current_timestamp();
-        
+
         if self.first_success_time.is_none() {
             self.first_success_time = Some(now);
         }
@@ -219,13 +218,13 @@ fn current_timestamp() -> u64 {
 pub struct DecoderRegistry {
     /// Map of pool addresses to their decoders (thread-safe)
     decoders: Arc<RwLock<HashMap<Pubkey, Box<dyn DexDecoder>>>>,
-    
+
     /// Map of pool addresses to their DEX types (for lazy initialization)
     pool_types: Arc<RwLock<HashMap<Pubkey, DexType>>>,
-    
+
     /// Map of pool addresses to their statistics
     stats: Arc<RwLock<HashMap<Pubkey, DecoderStats>>>,
-    
+
     /// Timestamp when statistics were last logged
     last_stats_log: Arc<RwLock<u64>>,
 }
@@ -256,20 +255,24 @@ impl DecoderRegistry {
     pub fn register_pool(&self, pool_config: PoolConfig) -> Result<(), AppError> {
         let pool_address = *pool_config.pool_address();
         let dex_type = pool_config.dex_type();
-        
+
         // Create decoder for this pool
         let decoder = create_decoder(dex_type);
-        
+
         // Store decoder and pool type
-        let mut decoders = self.decoders.write()
+        let mut decoders = self
+            .decoders
+            .write()
             .map_err(|e| AppError::ConfigError(format!("Failed to acquire write lock: {}", e)))?;
-        
-        let mut pool_types = self.pool_types.write()
+
+        let mut pool_types = self
+            .pool_types
+            .write()
             .map_err(|e| AppError::ConfigError(format!("Failed to acquire write lock: {}", e)))?;
-        
+
         decoders.insert(pool_address, decoder);
         pool_types.insert(pool_address, dex_type);
-        
+
         Ok(())
     }
 
@@ -291,9 +294,11 @@ impl DecoderRegistry {
     /// This is primarily used for validation. For decoding, use `decode_pool_data`
     /// which is more ergonomic.
     pub fn get_decoder(&self, pool_address: &Pubkey) -> Result<(), AppError> {
-        let decoders = self.decoders.read()
+        let decoders = self
+            .decoders
+            .read()
             .map_err(|e| AppError::ConfigError(format!("Failed to acquire read lock: {}", e)))?;
-        
+
         if decoders.contains_key(pool_address) {
             Ok(())
         } else {
@@ -323,36 +328,39 @@ impl DecoderRegistry {
         pool_address: &Pubkey,
         account_data: &[u8],
     ) -> Result<(u64, u64), AppError> {
-        let decoders = self.decoders.read()
+        let decoders = self
+            .decoders
+            .read()
             .map_err(|e| AppError::ConfigError(format!("Failed to acquire read lock: {}", e)))?;
-        
-        let decoder = decoders.get(pool_address)
-            .ok_or_else(|| AppError::ConfigError(format!(
-                "No decoder registered for pool: {}",
-                pool_address
-            )))?;
-        
+
+        let decoder = decoders.get(pool_address).ok_or_else(|| {
+            AppError::ConfigError(format!("No decoder registered for pool: {}", pool_address))
+        })?;
+
         // Try to decode
         let result = decoder.decode_reserves(account_data);
-        
+
         // Record statistics
         drop(decoders); // Release read lock before acquiring write lock
-        let mut stats = self.stats.write()
+        let mut stats = self
+            .stats
+            .write()
             .map_err(|e| AppError::ConfigError(format!("Failed to acquire write lock: {}", e)))?;
-        
+
         let pool_stats = stats.entry(*pool_address).or_insert_with(DecoderStats::new);
-        
+
         match &result {
             Ok(_) => pool_stats.record_success(),
             Err(_) => pool_stats.record_error(),
         }
-        
+
         result
     }
 
     /// Get the number of registered pools.
     pub fn pool_count(&self) -> usize {
-        self.decoders.read()
+        self.decoders
+            .read()
             .map(|decoders| decoders.len())
             .unwrap_or(0)
     }
@@ -381,32 +389,38 @@ impl DecoderRegistry {
     pub fn get_or_create_decoder(&self, pool_address: &Pubkey) -> Result<(), AppError> {
         // Fast path: check if decoder already exists (read lock)
         {
-            let decoders = self.decoders.read()
-                .map_err(|e| AppError::ConfigError(format!("Failed to acquire read lock: {}", e)))?;
-            
+            let decoders = self.decoders.read().map_err(|e| {
+                AppError::ConfigError(format!("Failed to acquire read lock: {}", e))
+            })?;
+
             if decoders.contains_key(pool_address) {
                 return Ok(());
             }
         }
 
         // Slow path: create decoder (write lock)
-        let mut decoders = self.decoders.write()
+        let mut decoders = self
+            .decoders
+            .write()
             .map_err(|e| AppError::ConfigError(format!("Failed to acquire write lock: {}", e)))?;
-        
+
         // Double-check: another thread might have created it while we waited
         if decoders.contains_key(pool_address) {
             return Ok(());
         }
 
         // Get pool type
-        let pool_types = self.pool_types.read()
+        let pool_types = self
+            .pool_types
+            .read()
             .map_err(|e| AppError::ConfigError(format!("Failed to acquire read lock: {}", e)))?;
-        
-        let dex_type = pool_types.get(pool_address)
-            .ok_or_else(|| AppError::ConfigError(format!(
+
+        let dex_type = pool_types.get(pool_address).ok_or_else(|| {
+            AppError::ConfigError(format!(
                 "Pool type not registered for: {}. Call register_pool_type first.",
                 pool_address
-            )))?;
+            ))
+        })?;
 
         // Create and insert decoder
         let decoder = create_decoder(*dex_type);
@@ -426,12 +440,14 @@ impl DecoderRegistry {
     pub fn register_pool_type(&self, pool_config: PoolConfig) -> Result<(), AppError> {
         let pool_address = *pool_config.pool_address();
         let dex_type = pool_config.dex_type();
-        
-        let mut pool_types = self.pool_types.write()
+
+        let mut pool_types = self
+            .pool_types
+            .write()
             .map_err(|e| AppError::ConfigError(format!("Failed to acquire write lock: {}", e)))?;
-        
+
         pool_types.insert(pool_address, dex_type);
-        
+
         Ok(())
     }
 
@@ -456,7 +472,7 @@ impl DecoderRegistry {
     ) -> Result<(u64, u64), AppError> {
         // Ensure decoder exists (creates if needed)
         self.get_or_create_decoder(pool_address)?;
-        
+
         // Now decode using the existing method
         self.decode_pool_data(pool_address, account_data)
     }
@@ -472,7 +488,8 @@ impl DecoderRegistry {
     /// * `Some(DecoderStats)` - Statistics if pool has been used
     /// * `None` - If pool has no statistics yet
     pub fn get_stats(&self, pool_address: &Pubkey) -> Option<DecoderStats> {
-        self.stats.read()
+        self.stats
+            .read()
             .ok()
             .and_then(|stats| stats.get(pool_address).cloned())
     }
@@ -483,7 +500,8 @@ impl DecoderRegistry {
     ///
     /// HashMap mapping pool addresses to their statistics
     pub fn get_all_stats(&self) -> HashMap<Pubkey, DecoderStats> {
-        self.stats.read()
+        self.stats
+            .read()
             .map(|stats| stats.clone())
             .unwrap_or_default()
     }
@@ -504,13 +522,11 @@ impl DecoderRegistry {
         const LOG_INTERVAL_SECONDS: u64 = 300; // 5 minutes
 
         let now = current_timestamp();
-        
+
         // Check if we should log
         if !force {
-            let last_log = self.last_stats_log.read()
-                .map(|t| *t)
-                .unwrap_or(0);
-            
+            let last_log = self.last_stats_log.read().map(|t| *t).unwrap_or(0);
+
             if now - last_log < LOG_INTERVAL_SECONDS {
                 return false;
             }
@@ -524,7 +540,7 @@ impl DecoderRegistry {
         // Print statistics
         println!("=== Decoder Statistics ===");
         println!("Timestamp: {}", now);
-        
+
         let all_stats = self.get_all_stats();
         if all_stats.is_empty() {
             println!("No statistics available yet.");
@@ -537,7 +553,7 @@ impl DecoderRegistry {
             println!("  Success count: {}", stats.success_count);
             println!("  Error count: {}", stats.error_count);
             println!("  Success rate: {:.2}%", stats.success_rate());
-            
+
             if let Some(first) = stats.first_success_time {
                 println!("  First success: {}", first);
             }
@@ -548,7 +564,7 @@ impl DecoderRegistry {
                 println!("  Last error: {}", last_err);
             }
         }
-        
+
         println!("========================\n");
         true
     }
@@ -594,12 +610,12 @@ mod tests {
     #[test]
     fn test_create_decoder_pumpfun() {
         let decoder = create_decoder(DexType::PumpFun);
-        
+
         // Create valid test data for PumpFun (256 bytes)
         let mut data = vec![0u8; 256];
         data[0x18..0x20].copy_from_slice(&1000u64.to_le_bytes());
         data[0x20..0x28].copy_from_slice(&2000u64.to_le_bytes());
-        
+
         let result = decoder.decode_reserves(&data);
         assert!(result.is_ok());
         let (token, sol) = result.unwrap();
@@ -610,7 +626,7 @@ mod tests {
     #[test]
     fn test_create_decoder_raydium() {
         let decoder = create_decoder(DexType::Raydium);
-        
+
         // Raydium decoder validation should work
         let data = vec![0u8; 100]; // Invalid size
         let result = decoder.validate_account(&data);
@@ -830,7 +846,7 @@ mod tests {
     #[test]
     fn test_decoder_stats_record_success() {
         let mut stats = DecoderStats::new();
-        
+
         stats.record_success();
         assert_eq!(stats.success_count, 1);
         assert_eq!(stats.error_count, 0);
@@ -842,7 +858,7 @@ mod tests {
     #[test]
     fn test_decoder_stats_record_error() {
         let mut stats = DecoderStats::new();
-        
+
         stats.record_error();
         assert_eq!(stats.success_count, 0);
         assert_eq!(stats.error_count, 1);
@@ -853,12 +869,12 @@ mod tests {
     #[test]
     fn test_decoder_stats_success_rate() {
         let mut stats = DecoderStats::new();
-        
+
         stats.record_success();
         stats.record_success();
         stats.record_success();
         stats.record_error();
-        
+
         assert_eq!(stats.total_attempts(), 4);
         assert_eq!(stats.success_rate(), 75.0);
     }
