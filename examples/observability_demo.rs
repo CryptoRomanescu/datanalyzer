@@ -6,7 +6,7 @@
 /// - Monitor connection health
 /// - Export Prometheus metrics
 
-use datanalyzer::{healthcheck, metrics::WebSocketMetrics, websocket::WebSocketManager, AppState};
+use datanalyzer::{healthcheck, metrics::WebSocketMetrics, websocket::WebSocketManager};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Create application state for health checks
-    let app_state = Arc::new(AppState::new(metrics.registry()));
+    let app_state = Arc::new(healthcheck::AppState::new(metrics.registry()));
 
     // Start healthcheck server on port 3000
     let healthcheck_addr: SocketAddr = "0.0.0.0:3000".parse()?;

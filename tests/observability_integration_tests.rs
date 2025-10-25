@@ -194,8 +194,8 @@ mod observability_tests {
         // Wait a bit
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        // Uptime should be greater than 0
-        let uptime = state.start_time.elapsed().as_secs();
-        assert!(uptime == 0); // May be 0 due to timing, but shouldn't panic
+        // Uptime should be greater than or equal to 0
+        let uptime = state.start_time.elapsed().as_millis();
+        assert!(uptime >= 100); // Should be at least 100ms since we waited
     }
 }
