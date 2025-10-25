@@ -55,6 +55,7 @@
 
 use crate::config::PoolConfig;
 use crate::error::AppError;
+use crate::metrics::WebSocketMetrics;
 use solana_client::nonblocking::pubsub_client::PubsubClient;
 use solana_client::rpc_config::RpcAccountInfoConfig;
 use solana_sdk::commitment_config::CommitmentConfig;
@@ -103,11 +104,23 @@ impl ReconnectStrategy {
         }
     }
 
-    /// Get the next delay duration and update internal state
+    /// Get the next delay duration and update internal state with jitter
     ///
-    /// Returns the current delay and then increases it for the next call
+    /// Returns the current delay with added jitter (±20%) and then increases it for the next call
     pub fn next_delay(&mut self) -> Duration {
-        let delay = self.current_delay;
+        let base_delay = self.current_delay;
+        
+        // Add jitter: ±20% of the base delay
+        let jitter_factor = {
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            // Generate a random factor between 0.8 and 1.2
+            rng.gen_range(0.8..=1.2)
+        };
+        
+        let delay_with_jitter = Duration::from_secs_f64(
+            base_delay.as_secs_f64() * jitter_factor
+        );
 
         // Calculate next delay with exponential backoff
         let next = Duration::from_secs_f64(self.current_delay.as_secs_f64() * self.multiplier);
@@ -119,7 +132,7 @@ impl ReconnectStrategy {
             next
         };
 
-        delay
+        delay_with_jitter
     }
 
     /// Reset the strategy to initial delay
@@ -153,6 +166,7 @@ pub struct WebSocketManager {
     problematic_pools: Arc<Mutex<HashSet<Pubkey>>>,
     pool_failure_counts: Arc<Mutex<HashMap<Pubkey, u32>>>,
     is_connected: Arc<Mutex<bool>>,
+    metrics: Option<Arc<WebSocketMetrics>>,
 }
 
 impl WebSocketManager {
@@ -176,6 +190,36 @@ impl WebSocketManager {
             problematic_pools: Arc::new(Mutex::new(HashSet::new())),
             pool_failure_counts: Arc::new(Mutex::new(HashMap::new())),
             is_connected: Arc::new(Mutex::new(false)),
+            metrics: None,
+        }
+    }
+    
+    /// Create a new WebSocketManager instance with metrics
+    ///
+    /// # Arguments
+    ///
+    /// * `ws_url` - WebSocket URL for the Solana RPC endpoint
+    /// * `snapshot_interval_ms` - Minimum interval between snapshots in milliseconds (0 to disable throttling)
+    /// * `metrics` - WebSocket metrics collector
+    pub fn with_metrics(
+        ws_url: String,
+        snapshot_interval_ms: u64,
+        metrics: Arc<WebSocketMetrics>,
+    ) -> Self {
+        Self {
+            ws_url,
+            client: None,
+            subscriptions: Arc::new(Mutex::new(HashMap::new())),
+            last_snapshot_time: Arc::new(Mutex::new(HashMap::new())),
+            snapshot_interval_ms,
+            skipped_notifications: Arc::new(Mutex::new(HashMap::new())),
+            next_subscription_id: Arc::new(Mutex::new(1)),
+            monitored_pools: Arc::new(Mutex::new(Vec::new())),
+            reconnect_strategy: Arc::new(Mutex::new(ReconnectStrategy::new())),
+            problematic_pools: Arc::new(Mutex::new(HashSet::new())),
+            pool_failure_counts: Arc::new(Mutex::new(HashMap::new())),
+            is_connected: Arc::new(Mutex::new(false)),
+            metrics: Some(metrics),
         }
     }
 
@@ -188,19 +232,36 @@ impl WebSocketManager {
     pub async fn connect(&mut self) -> Result<(), AppError> {
         let ws_url = self.ws_url.clone();
 
-        log::info!("Attempting to connect to WebSocket at: {}", ws_url);
+        tracing::info!("Attempting to connect to WebSocket at: {}", ws_url);
+        
+        // Record connection attempt
+        if let Some(ref metrics) = self.metrics {
+            metrics.record_connection_attempt();
+        }
 
         // Attempt connection with 10 second timeout
         match tokio::time::timeout(Duration::from_secs(10), PubsubClient::new(&ws_url)).await {
             Ok(Ok(client)) => {
                 self.client = Some(Arc::new(client));
                 *self.is_connected.lock().await = true;
+                
+                // Record successful connection
+                if let Some(ref metrics) = self.metrics {
+                    metrics.record_connection_success();
+                }
+                
                 let timestamp = chrono::Utc::now().to_rfc3339();
-                log::info!("Successfully connected to WebSocket at {}", timestamp);
+                tracing::info!("Successfully connected to WebSocket at {}", timestamp);
                 Ok(())
             }
             Ok(Err(e)) => {
                 *self.is_connected.lock().await = false;
+                
+                // Record failed connection
+                if let Some(ref metrics) = self.metrics {
+                    metrics.record_connection_failure();
+                }
+                
                 Err(AppError::RpcError(format!(
                     "Failed to create PubsubClient: {}. Please check if the URL is valid and the endpoint is accessible.",
                     e
@@ -208,6 +269,12 @@ impl WebSocketManager {
             }
             Err(_) => {
                 *self.is_connected.lock().await = false;
+                
+                // Record failed connection
+                if let Some(ref metrics) = self.metrics {
+                    metrics.record_connection_failure();
+                }
+                
                 Err(AppError::RpcError(
                     "Connection timeout after 10 seconds. Please check your network connection and endpoint availability.".to_string()
                 ))
@@ -229,6 +296,11 @@ impl WebSocketManager {
         let client = self.client.as_ref().ok_or_else(|| {
             AppError::RpcError("Not connected. Call connect() first.".to_string())
         })?;
+        
+        // Record subscription attempt
+        if let Some(ref metrics) = self.metrics {
+            metrics.record_subscription_attempt();
+        }
 
         // Subscribe with commitment config
         let config = RpcAccountInfoConfig {
@@ -253,8 +325,13 @@ impl WebSocketManager {
                 if !monitored.contains(&pool_address) {
                     monitored.push(pool_address);
                 }
+                
+                // Update metrics
+                if let Some(ref metrics) = self.metrics {
+                    metrics.set_active_subscriptions(subscriptions.len());
+                }
 
-                log::info!(
+                tracing::info!(
                     "Subscribed to pool {} with subscription ID: {}",
                     pool_address,
                     subscription_id
@@ -266,6 +343,11 @@ impl WebSocketManager {
                 Ok(())
             }
             Err(e) => {
+                // Record subscription failure
+                if let Some(ref metrics) = self.metrics {
+                    metrics.record_subscription_failure();
+                }
+                
                 // Track failure for this pool
                 let mut failure_counts = self.pool_failure_counts.lock().await;
                 let count = failure_counts.entry(pool_address).or_insert(0);
@@ -275,7 +357,13 @@ impl WebSocketManager {
                 if *count >= 3 {
                     let mut problematic = self.problematic_pools.lock().await;
                     problematic.insert(pool_address);
-                    log::warn!(
+                    
+                    // Update metrics
+                    if let Some(ref metrics) = self.metrics {
+                        metrics.set_problematic_pools(problematic.len());
+                    }
+                    
+                    tracing::warn!(
                         "Pool {} marked as problematic after {} failures",
                         pool_address,
                         count
@@ -304,7 +392,7 @@ impl WebSocketManager {
         for pool in pools {
             self.subscribe_pool(*pool.pool_address()).await?;
         }
-        log::info!("Successfully subscribed to {} pools", pools.len());
+        tracing::info!("Successfully subscribed to {} pools", pools.len());
         Ok(())
     }
 
@@ -351,12 +439,12 @@ impl WebSocketManager {
             let (mut stream, _unsubscribe) = match subscription_result {
                 Ok(sub) => sub,
                 Err(e) => {
-                    log::error!("Failed to subscribe to pool {}: {}", pool_address, e);
+                    tracing::error!("Failed to subscribe to pool {}: {}", pool_address, e);
                     return;
                 }
             };
 
-            log::info!("Started listening to pool {}", pool_address);
+            tracing::info!("Started listening to pool {}", pool_address);
 
             while let Some(update) = stream.next().await {
                 let slot = update.context.slot;
@@ -395,12 +483,12 @@ impl WebSocketManager {
                     if let Some(account) = update.value.data.decode() {
                         callback(pool_address, account.to_vec(), slot);
                     } else {
-                        log::warn!("Failed to decode account data for pool {}", pool_address);
+                        tracing::warn!("Failed to decode account data for pool {}", pool_address);
                     }
                 }
             }
 
-            log::warn!(
+            tracing::warn!(
                 "Stopped listening to pool {} - connection lost or stream ended",
                 pool_address
             );
@@ -436,7 +524,7 @@ impl WebSocketManager {
             self.listen_pool(*pool, pool_callback).await?;
         }
 
-        log::info!(
+        tracing::info!(
             "Started listening to {} pools with {}s disconnect timeout",
             pools.len(),
             disconnect_timeout_secs
@@ -455,11 +543,17 @@ impl WebSocketManager {
     pub async fn mark_disconnected(&mut self, reason: &str) {
         self.client = None;
         *self.is_connected.lock().await = false;
+        
+        // Record disconnection
+        if let Some(ref metrics) = self.metrics {
+            metrics.record_disconnection();
+        }
+        
         let timestamp = chrono::Utc::now().to_rfc3339();
-        log::warn!("Connection lost at {} - Reason: {}", timestamp, reason);
+        tracing::warn!("Connection lost at {} - Reason: {}", timestamp, reason);
     }
 
-    /// Reconnect loop with exponential backoff
+    /// Reconnect loop with exponential backoff and jitter
     ///
     /// Attempts to reconnect with exponential backoff strategy.
     /// After successful reconnection, calls resubscribe_all().
@@ -490,33 +584,53 @@ impl WebSocketManager {
                 }
             }
 
-            log::info!("Reconnection attempt #{}", attempt);
+            tracing::info!("Reconnection attempt #{}", attempt);
+            
+            // Record reconnection attempt
+            if let Some(ref metrics) = self.metrics {
+                metrics.record_reconnection_attempt();
+            }
 
             match self.connect().await {
                 Ok(()) => {
-                    log::info!("Reconnection successful on attempt #{}", attempt);
+                    tracing::info!("Reconnection successful on attempt #{}", attempt);
+                    
+                    // Record successful reconnection
+                    if let Some(ref metrics) = self.metrics {
+                        metrics.record_reconnection_success();
+                    }
 
                     // Reset reconnect strategy after successful connection
                     self.reconnect_strategy.lock().await.reset();
 
                     // Resubscribe to all pools
                     if let Err(e) = self.resubscribe_all().await {
-                        log::error!("Failed to resubscribe after reconnection: {}", e);
+                        tracing::error!("Failed to resubscribe after reconnection: {}", e);
                         // Continue anyway - we're connected at least
                     }
 
                     return Ok(());
                 }
                 Err(e) => {
-                    log::warn!("Reconnection attempt #{} failed: {}", attempt, e);
+                    tracing::warn!("Reconnection attempt #{} failed: {}", attempt, e);
+                    
+                    // Record failed reconnection
+                    if let Some(ref metrics) = self.metrics {
+                        metrics.record_reconnection_failure();
+                    }
 
-                    // Get next delay from strategy
+                    // Get next delay from strategy (with jitter)
                     let delay = {
                         let mut strategy = self.reconnect_strategy.lock().await;
                         strategy.next_delay()
                     };
+                    
+                    // Record reconnection delay
+                    if let Some(ref metrics) = self.metrics {
+                        metrics.record_reconnection_delay(delay.as_secs_f64());
+                    }
 
-                    log::info!("Waiting {:?} before next reconnection attempt", delay);
+                    tracing::info!("Waiting {:?} before next reconnection attempt", delay);
                     tokio::time::sleep(delay).await;
                 }
             }
@@ -544,11 +658,11 @@ impl WebSocketManager {
         };
 
         if pools.is_empty() {
-            log::info!("No pools to resubscribe");
+            tracing::info!("No pools to resubscribe");
             return Ok(());
         }
 
-        log::info!("Resubscribing to {} pools", pools.len());
+        tracing::info!("Resubscribing to {} pools", pools.len());
 
         let mut success_count = 0;
         let mut failure_count = 0;
@@ -562,14 +676,14 @@ impl WebSocketManager {
             };
 
             if is_problematic {
-                log::warn!("Skipping problematic pool {} during resubscription", pool);
+                tracing::warn!("Skipping problematic pool {} during resubscription", pool);
                 continue;
             }
 
             match self.subscribe_pool(*pool).await {
                 Ok(()) => {
                     success_count += 1;
-                    log::info!("Successfully resubscribed to pool {}", pool);
+                    tracing::info!("Successfully resubscribed to pool {}", pool);
 
                     // Reset failure count on success
                     let mut failure_counts = self.pool_failure_counts.lock().await;
@@ -577,7 +691,7 @@ impl WebSocketManager {
                 }
                 Err(e) => {
                     failure_count += 1;
-                    log::error!("Failed to resubscribe to pool {}: {}", pool, e);
+                    tracing::error!("Failed to resubscribe to pool {}: {}", pool, e);
                     if first_error.is_none() {
                         first_error = Some(e);
                     }
@@ -585,7 +699,7 @@ impl WebSocketManager {
             }
         }
 
-        log::info!(
+        tracing::info!(
             "Resubscription complete: {} succeeded, {} failed",
             success_count,
             failure_count
@@ -613,11 +727,11 @@ impl WebSocketManager {
         };
 
         if pools_to_retry.is_empty() {
-            log::info!("No problematic pools to retry");
+            tracing::info!("No problematic pools to retry");
             return 0;
         }
 
-        log::info!("Retrying {} problematic pools", pools_to_retry.len());
+        tracing::info!("Retrying {} problematic pools", pools_to_retry.len());
 
         let mut success_count = 0;
 
@@ -625,7 +739,7 @@ impl WebSocketManager {
             match self.subscribe_pool(*pool).await {
                 Ok(()) => {
                     success_count += 1;
-                    log::info!(
+                    tracing::info!(
                         "Successfully resubscribed to previously problematic pool {}",
                         pool
                     );
@@ -639,12 +753,12 @@ impl WebSocketManager {
                     failure_counts.remove(pool);
                 }
                 Err(e) => {
-                    log::error!("Still cannot subscribe to problematic pool {}: {}", pool, e);
+                    tracing::error!("Still cannot subscribe to problematic pool {}: {}", pool, e);
                 }
             }
         }
 
-        log::info!(
+        tracing::info!(
             "Retry complete: {} out of {} problematic pools recovered",
             success_count,
             pools_to_retry.len()
@@ -706,9 +820,9 @@ impl WebSocketManager {
     pub async fn log_skipped_stats(&self) {
         let skipped = self.skipped_notifications.lock().await;
         if !skipped.is_empty() {
-            log::info!("=== Throttling Statistics ===");
+            tracing::info!("=== Throttling Statistics ===");
             for (pool, count) in skipped.iter() {
-                log::info!("Pool {}: {} notifications skipped", pool, count);
+                tracing::info!("Pool {}: {} notifications skipped", pool, count);
             }
         }
     }
@@ -935,17 +1049,25 @@ mod tests {
     fn test_reconnect_strategy_exponential_backoff() {
         let mut strategy = ReconnectStrategy::new();
 
-        // First delay should be 1 second
-        assert_eq!(strategy.next_delay(), Duration::from_secs(1));
+        // First delay should be around 1 second (with jitter: 0.8-1.2s)
+        let delay1 = strategy.next_delay();
+        assert!(delay1 >= Duration::from_millis(800));
+        assert!(delay1 <= Duration::from_millis(1200));
 
-        // Second delay should be 2 seconds
-        assert_eq!(strategy.next_delay(), Duration::from_secs(2));
+        // Second delay should be around 2 seconds (with jitter: 1.6-2.4s)
+        let delay2 = strategy.next_delay();
+        assert!(delay2 >= Duration::from_millis(1600));
+        assert!(delay2 <= Duration::from_millis(2400));
 
-        // Third delay should be 4 seconds
-        assert_eq!(strategy.next_delay(), Duration::from_secs(4));
+        // Third delay should be around 4 seconds (with jitter: 3.2-4.8s)
+        let delay3 = strategy.next_delay();
+        assert!(delay3 >= Duration::from_millis(3200));
+        assert!(delay3 <= Duration::from_millis(4800));
 
-        // Fourth delay should be 8 seconds
-        assert_eq!(strategy.next_delay(), Duration::from_secs(8));
+        // Fourth delay should be around 8 seconds (with jitter: 6.4-9.6s)
+        let delay4 = strategy.next_delay();
+        assert!(delay4 >= Duration::from_millis(6400));
+        assert!(delay4 <= Duration::from_millis(9600));
     }
 
     #[test]
@@ -984,9 +1106,20 @@ mod tests {
             3.0,
         );
 
-        assert_eq!(strategy.next_delay(), Duration::from_millis(500));
-        assert_eq!(strategy.next_delay(), Duration::from_millis(1500));
-        assert_eq!(strategy.next_delay(), Duration::from_millis(4500));
+        // First delay should be around 500ms (with jitter: 400-600ms)
+        let delay1 = strategy.next_delay();
+        assert!(delay1 >= Duration::from_millis(400));
+        assert!(delay1 <= Duration::from_millis(600));
+        
+        // Second delay should be around 1500ms (with jitter: 1200-1800ms)
+        let delay2 = strategy.next_delay();
+        assert!(delay2 >= Duration::from_millis(1200));
+        assert!(delay2 <= Duration::from_millis(1800));
+        
+        // Third delay should be around 4500ms (with jitter: 3600-5400ms)
+        let delay3 = strategy.next_delay();
+        assert!(delay3 >= Duration::from_millis(3600));
+        assert!(delay3 <= Duration::from_millis(5400));
     }
 
     // Tests for reconnection logic

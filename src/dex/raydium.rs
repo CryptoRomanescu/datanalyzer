@@ -39,6 +39,7 @@
 /// an async RPC client, which is beyond the scope of this synchronous decoder trait.
 use crate::dex::DexDecoder;
 use crate::error::AppError;
+use crate::orchestrator;
 use bytemuck::{Pod, Zeroable};
 use solana_sdk::pubkey::Pubkey;
 
@@ -350,9 +351,9 @@ impl RaydiumDecoder {
     ///
     /// * `Ok(ReserveInfo)` - Reserve information (RequiresVaults variant)
     /// * `Err(AppError)` - If data is invalid
-    pub fn decode_reserve_info(&self, account_data: &[u8]) -> Result<crate::orchestrator::ReserveInfo, AppError> {
+    pub fn decode_reserve_info(&self, account_data: &[u8]) -> Result<orchestrator::ReserveInfo, AppError> {
         let vault_info = self.get_vault_info(account_data)?;
-        Ok(crate::orchestrator::ReserveInfo::RequiresVaults(vault_info))
+        Ok(orchestrator::ReserveInfo::RequiresVaults(vault_info))
     }
 }
 
