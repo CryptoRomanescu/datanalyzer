@@ -43,13 +43,30 @@ Create a `config.toml` file:
 ```toml
 # Solana RPC Configuration
 rpc_url = "https://api.mainnet-beta.solana.com"
-ws_url = "wss://api.mainnet-beta.solana.com"
+rpc_ws_url = "wss://api.mainnet-beta.solana.com"
+
+# Output directory for CSV files
+output_dir = "./snapshots"
 
 # Monitoring Configuration
-snapshot_interval_ms = 60000  # 1 minute
+snapshot_interval_ms = 5000  # 5 seconds
 
-# CSV Output
-csv_file_path = "./data/pools.csv"
+# CSV Writer Configuration
+[csv]
+# Enable append mode (default: true)
+append = true
+
+# Maximum file size in bytes before rotation (default: 500MB)
+max_file_size = 500000000
+
+# Maximum file age in seconds before rotation (0 = no rotation, default: 0)
+max_file_age = 0
+
+# Number of records to buffer before flushing (default: 500)
+batch_size = 500
+
+# Time in milliseconds before auto-flush (default: 3000 = 3 seconds)
+batch_time_ms = 3000
 
 # Price Fetcher
 [price_fetcher]
@@ -68,28 +85,27 @@ cache_ttl_secs = 600
 
 # Pools to Monitor
 [[pools]]
-address = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"  # SOL/USDC Raydium
+pool_address = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"  # SOL/USDC Raydium
 dex_type = "raydium"
+token_mint = "So11111111111111111111111111111111111111112"
 
 [[pools]]
-address = "7YttLkHDoNj9wyDur5pM1ejNaAvT9X4eqaYcHQqtj2G5"  # Example Pump.fun
+pool_address = "7YttLkHDoNj9wyDur5pM1ejNaAvT9X4eqaYcHQqtj2G5"  # Example Pump.fun
 dex_type = "pumpfun"
-
-# Health Check
-[healthcheck]
-host = "127.0.0.1"
-port = 8080
-
-# Metrics
-[metrics]
-host = "127.0.0.1"
-port = 9090
-
-# Throttling (optional)
-[throttle]
-updates_per_second = 10.0
-bucket_size = 10
+token_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 ```
+
+#### CSV Configuration Options
+
+The `[csv]` section controls CSV file writing behavior with support for rotation, batching, and append mode:
+
+- **`append`** (bool): When `true`, appends to existing CSV files instead of overwriting them. Default: `true`
+- **`max_file_size`** (u64): Maximum file size in bytes before triggering rotation. When the file exceeds this size, it's renamed with a timestamp suffix and a new file is created. Set to `0` to disable size-based rotation. Default: `500000000` (500MB)
+- **`max_file_age`** (u64): Maximum file age in seconds before triggering rotation. When the file is older than this duration, it's rotated. Set to `0` to disable age-based rotation. Default: `0` (disabled)
+- **`batch_size`** (usize): Number of records to buffer before flushing to disk. Larger values improve performance but increase risk of data loss on crashes. Default: `500`
+- **`batch_time_ms`** (u64): Maximum time in milliseconds between flushes. Even if `batch_size` isn't reached, data is flushed after this interval. Set to `0` to disable time-based flushing. Default: `3000` (3 seconds)
+
+**File Rotation**: When rotation is triggered (by size or age), the current file is renamed to `{basename}_{timestamp}.csv` (e.g., `raydium_58oQChx4.csv` → `raydium_58oQChx4_1730000000.csv`) and a new file with the original name is created with headers.
 
 ### Running
 
@@ -214,16 +230,45 @@ let price = fallback.fetch_price("So11111111111111111111111111111111111111112").
 
 ### CSV Writer
 
+The orchestrator uses `CsvWriter` with full configuration support for rotation, batching, and append mode:
+
 ```rust
-use datanalyzer::{CsvWriter, PoolSnapshot};
+use datanalyzer::csv_writer::{CsvWriter, CsvWriterConfig};
 
-let headers = &["pool_address", "token_mint", "dex_type", ...];
-let mut writer = CsvWriter::new("./data/pools.csv", headers)?;
+// Create configuration
+let config = CsvWriterConfig::builder()
+    .append(true)
+    .max_file_size(500_000_000)  // 500MB
+    .max_file_age(0)              // No age-based rotation
+    .batch_size(500)              // Flush every 500 records
+    .batch_time_ms(3000)          // Or every 3 seconds
+    .build();
 
+// Headers match PoolSnapshot::to_csv_row()
+let headers = &[
+    "pool_address", "token_mint", "dex_type", 
+    "reserve_base", "reserve_quote", "timestamp", 
+    "price", "liquidity_usd"
+];
+
+// Create writer with configuration
+let mut writer = CsvWriter::with_config("./snapshots/pool.csv", headers, config)?;
+
+// Write records - automatic batching and rotation
 let snapshot = PoolSnapshot::new(...)?;
 writer.write_record(&snapshot.to_csv_row())?;
+
+// Flush is called automatically based on batch_size and batch_time_ms
+// Or manually:
 writer.flush()?;
 ```
+
+**Features:**
+- **Automatic Headers**: Headers are written once when creating or rotating files
+- **Append Mode**: Continue writing to existing files without overwriting
+- **File Rotation**: Automatically rotates files based on size or age
+- **Batched Writes**: Configurable batching for optimal performance
+- **Auto-flush**: Flushes on Drop to prevent data loss
 
 ## CSV Output Format
 

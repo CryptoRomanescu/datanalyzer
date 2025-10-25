@@ -35,6 +35,71 @@ impl PoolConfigToml {
     }
 }
 
+/// Configuration for CSV writer behavior
+#[derive(Debug, Clone, Deserialize)]
+pub struct CsvConfig {
+    /// Enable append mode (default: true)
+    #[serde(default = "default_csv_append")]
+    pub append: bool,
+    /// Maximum file size in bytes before rotation (default: 500MB)
+    #[serde(default = "default_csv_max_file_size")]
+    pub max_file_size: u64,
+    /// Maximum file age in seconds before rotation (default: 0 = no rotation)
+    #[serde(default = "default_csv_max_file_age")]
+    pub max_file_age: u64,
+    /// Batch size: flush after N records (default: 500)
+    #[serde(default = "default_csv_batch_size")]
+    pub batch_size: usize,
+    /// Batch time: flush after T milliseconds (default: 3000 = 3 seconds)
+    #[serde(default = "default_csv_batch_time_ms")]
+    pub batch_time_ms: u64,
+}
+
+fn default_csv_append() -> bool {
+    true
+}
+
+fn default_csv_max_file_size() -> u64 {
+    500_000_000 // 500MB
+}
+
+fn default_csv_max_file_age() -> u64 {
+    0 // 0 = no rotation
+}
+
+fn default_csv_batch_size() -> usize {
+    500
+}
+
+fn default_csv_batch_time_ms() -> u64 {
+    3000 // 3 seconds
+}
+
+impl Default for CsvConfig {
+    fn default() -> Self {
+        Self {
+            append: default_csv_append(),
+            max_file_size: default_csv_max_file_size(),
+            max_file_age: default_csv_max_file_age(),
+            batch_size: default_csv_batch_size(),
+            batch_time_ms: default_csv_batch_time_ms(),
+        }
+    }
+}
+
+impl CsvConfig {
+    /// Convert to CsvWriterConfig from csv_writer module
+    pub fn to_csv_writer_config(&self) -> crate::csv_writer::CsvWriterConfig {
+        crate::csv_writer::CsvWriterConfig {
+            append: self.append,
+            max_file_size: self.max_file_size,
+            max_file_age: self.max_file_age,
+            batch_size: self.batch_size,
+            batch_time_ms: self.batch_time_ms,
+        }
+    }
+}
+
 /// Configuration for CSV persistence
 #[derive(Debug, Clone, Deserialize)]
 pub struct PersistenceConfig {
@@ -172,6 +237,8 @@ pub struct AppConfig {
     pub snapshot_interval_ms: u64,
     pub pools: Vec<PoolConfigToml>,
     #[serde(default)]
+    pub csv: CsvConfig,
+    #[serde(default)]
     pub persistence: PersistenceConfig,
     #[serde(default)]
     pub retry: RetryConfig,
@@ -282,6 +349,7 @@ impl AppConfig {
             output_dir: self.output_dir,
             snapshot_interval_ms: self.snapshot_interval_ms,
             pools: pools?,
+            csv: self.csv,
             persistence: self.persistence,
             retry: self.retry,
             rate_limit: self.rate_limit,
@@ -299,6 +367,7 @@ pub struct RuntimeConfig {
     pub output_dir: String,
     pub snapshot_interval_ms: u64,
     pub pools: Vec<PoolConfig>,
+    pub csv: CsvConfig,
     pub persistence: PersistenceConfig,
     pub retry: RetryConfig,
     pub rate_limit: RateLimitConfig,

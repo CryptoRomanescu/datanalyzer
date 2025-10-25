@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 use std::sync::Arc;
@@ -30,8 +31,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let app_cfg = AppConfig::load(&config_path)?;
     let runtime_cfg = app_cfg.into_runtime_config()?;
 
+    // Build token mapping from config
+    let mut token_map = HashMap::new();
+    for mapping in &runtime_cfg.token_mapping {
+        if let Ok(pubkey) = mapping.mint.parse::<Pubkey>() {
+            token_map.insert(pubkey, mapping.coingecko_id.clone());
+        }
+    }
+
     // Price fetcher (TTL można przenieść do configu)
-    let price_fetcher = Arc::new(PriceFetcher::new(std::time::Duration::from_secs(300)));
+    let price_fetcher = Arc::new(PriceFetcher::new(std::time::Duration::from_secs(
+        runtime_cfg.price_fetcher.cache_ttl_secs,
+    )));
+
+    // Convert CsvConfig to CsvWriterConfig
+    let csv_writer_config = runtime_cfg.csv.to_csv_writer_config();
 
     // Orchestrator: RPC (HTTP), compute, CSV; przekazujemy mapę mint->coingecko z configu
     let orch = Arc::new(Orchestrator::new(
@@ -39,7 +53,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Arc::clone(&price_fetcher),
         &runtime_cfg.output_dir,
         &runtime_cfg.pools,
-        runtime_cfg.mint_map.clone(),
+        token_map,
+        csv_writer_config,
     ));
 
     // WebSocket + połączenie
