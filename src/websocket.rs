@@ -56,6 +56,7 @@
 use crate::config::PoolConfig;
 use crate::error::AppError;
 use crate::metrics::WebSocketMetrics;
+use solana_account_decoder::UiAccountEncoding;
 use solana_client::nonblocking::pubsub_client::PubsubClient;
 use solana_client::rpc_config::RpcAccountInfoConfig;
 use solana_sdk::commitment_config::CommitmentConfig;
@@ -165,6 +166,8 @@ pub struct WebSocketManager {
     pool_failure_counts: Arc<Mutex<HashMap<Pubkey, u32>>>,
     is_connected: Arc<Mutex<bool>>,
     metrics: Option<Arc<WebSocketMetrics>>,
+    /// Track pools that have received their first update (for debug logging)
+    first_update_logged: Arc<Mutex<HashSet<Pubkey>>>,
 }
 
 impl WebSocketManager {
@@ -189,6 +192,7 @@ impl WebSocketManager {
             pool_failure_counts: Arc::new(Mutex::new(HashMap::new())),
             is_connected: Arc::new(Mutex::new(false)),
             metrics: None,
+            first_update_logged: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -218,6 +222,7 @@ impl WebSocketManager {
             pool_failure_counts: Arc::new(Mutex::new(HashMap::new())),
             is_connected: Arc::new(Mutex::new(false)),
             metrics: Some(metrics),
+            first_update_logged: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -301,8 +306,9 @@ impl WebSocketManager {
         }
 
         // Subscribe with commitment config
+        // IMPORTANT: Use explicit Base64 encoding for consistent decoding
         let config = RpcAccountInfoConfig {
-            encoding: None,
+            encoding: Some(UiAccountEncoding::Base64),
             commitment: Some(CommitmentConfig::confirmed()),
             data_slice: None,
             min_context_slot: None,
@@ -419,6 +425,7 @@ impl WebSocketManager {
         })?);
         let last_snapshot_time = Arc::clone(&self.last_snapshot_time);
         let skipped_notifications = Arc::clone(&self.skipped_notifications);
+        let first_update_logged = Arc::clone(&self.first_update_logged);
         let snapshot_interval_ms = self.snapshot_interval_ms;
 
         // Spawn a task to create subscription and listen to the stream
@@ -426,7 +433,7 @@ impl WebSocketManager {
             use futures_util::StreamExt;
 
             let config = RpcAccountInfoConfig {
-                encoding: None,
+                encoding: Some(UiAccountEncoding::Base64),
                 commitment: Some(CommitmentConfig::confirmed()),
                 data_slice: None,
                 min_context_slot: None,
@@ -446,6 +453,41 @@ impl WebSocketManager {
 
             while let Some(update) = stream.next().await {
                 let slot = update.context.slot;
+                
+                // Log debug info on first update for this pool
+                let mut first_logged = first_update_logged.lock().await;
+                if !first_logged.contains(&pool_address) {
+                    // Extract owner and data length for debugging
+                    let account_info = &update.value;
+                    let owner = &account_info.owner;
+                    let data_len = if let Some(decoded_data) = account_info.data.decode() {
+                        decoded_data.len()
+                    } else {
+                        0
+                    };
+                    
+                    tracing::info!(
+                        "First update for pool {}: owner={}, data_length={} bytes",
+                        pool_address,
+                        owner,
+                        data_len
+                    );
+                    
+                    // Verify it's a Raydium AMM v4 pool
+                    const RAYDIUM_AMM_V4_PROGRAM: &str = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8";
+                    if owner == RAYDIUM_AMM_V4_PROGRAM {
+                        tracing::info!("✓ Verified Raydium AMM v4 program for pool {}", pool_address);
+                    } else {
+                        tracing::warn!(
+                            "⚠ Pool {} owner {} is not Raydium AMM v4 (expected {})",
+                            pool_address,
+                            owner,
+                            RAYDIUM_AMM_V4_PROGRAM
+                        );
+                    }
+                    first_logged.insert(pool_address);
+                }
+                drop(first_logged);
 
                 // Check throttling
                 let should_process = if snapshot_interval_ms == 0 {
