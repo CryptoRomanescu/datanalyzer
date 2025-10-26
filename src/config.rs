@@ -267,6 +267,75 @@ impl Default for OracleConfig {
     }
 }
 
+/// Configuration for pool discovery
+#[derive(Debug, Clone, Deserialize)]
+pub struct DiscoveryConfig {
+    /// Enable PumpSwap pool discovery
+    #[serde(default = "default_enable_pumpswap")]
+    pub enable_pumpswap: bool,
+
+    /// PumpSwap program ID
+    #[serde(default = "default_pumpswap_program_id")]
+    pub pumpswap_program_id: String,
+
+    /// Quote token allowlist (only pools with these quote mints will be subscribed)
+    #[serde(default = "default_quote_allowlist")]
+    pub quote_allowlist: Vec<String>,
+
+    /// Minimum quote liquidity to subscribe to a pool (in base units)
+    #[serde(default = "default_min_quote_liquidity")]
+    pub min_quote_liquidity: f64,
+
+    /// Maximum number of pools to track
+    #[serde(default = "default_max_pools")]
+    pub max_pools: usize,
+
+    /// Interval between rescans in seconds
+    #[serde(default = "default_rescan_interval_secs")]
+    pub rescan_interval_secs: u64,
+}
+
+fn default_enable_pumpswap() -> bool {
+    false
+}
+
+fn default_pumpswap_program_id() -> String {
+    "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA".to_string()
+}
+
+fn default_quote_allowlist() -> Vec<String> {
+    vec![
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(), // USDC
+        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB".to_string(), // USDT
+        "So11111111111111111111111111111111111111112".to_string(),  // SOL
+    ]
+}
+
+fn default_min_quote_liquidity() -> f64 {
+    1000.0
+}
+
+fn default_max_pools() -> usize {
+    2000
+}
+
+fn default_rescan_interval_secs() -> u64 {
+    300 // 5 minutes
+}
+
+impl Default for DiscoveryConfig {
+    fn default() -> Self {
+        Self {
+            enable_pumpswap: default_enable_pumpswap(),
+            pumpswap_program_id: default_pumpswap_program_id(),
+            quote_allowlist: default_quote_allowlist(),
+            min_quote_liquidity: default_min_quote_liquidity(),
+            max_pools: default_max_pools(),
+            rescan_interval_secs: default_rescan_interval_secs(),
+        }
+    }
+}
+
 /// Application configuration loaded from TOML
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
@@ -289,6 +358,8 @@ pub struct AppConfig {
     pub oracle: OracleConfig,
     #[serde(default)]
     pub token_mapping: Vec<TokenMappingEntry>,
+    #[serde(default)]
+    pub discovery: DiscoveryConfig,
 }
 
 impl AppConfig {
@@ -367,9 +438,9 @@ impl AppConfig {
         }
 
         // Validate pools list
-        if self.pools.is_empty() {
+        if self.pools.is_empty() && !self.discovery.enable_pumpswap {
             return Err(AppError::ConfigError(
-                "At least one pool must be configured".to_string(),
+                "At least one pool must be configured or discovery must be enabled".to_string(),
             ));
         }
 
@@ -397,6 +468,7 @@ impl AppConfig {
             price_fetcher: self.price_fetcher,
             oracle: self.oracle,
             token_mapping: self.token_mapping,
+            discovery: self.discovery,
         })
     }
 }
@@ -416,6 +488,7 @@ pub struct RuntimeConfig {
     pub price_fetcher: PriceFetcherConfig,
     pub oracle: OracleConfig,
     pub token_mapping: Vec<TokenMappingEntry>,
+    pub discovery: DiscoveryConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -565,6 +638,7 @@ mod tests {
             price_fetcher: PriceFetcherConfig::default(),
             oracle: OracleConfig::default(),
             token_mapping: vec![],
+            discovery: DiscoveryConfig::default(),
         }
     }
 

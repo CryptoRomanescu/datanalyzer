@@ -4,6 +4,7 @@
 /// pool account structures on Solana. Each DEX has its own data layout,
 /// and this module abstracts the decoding logic behind a common interface.
 pub mod pumpfun;
+pub mod pumpswap;
 pub mod raydium;
 
 use crate::config::PoolConfig;
@@ -117,6 +118,7 @@ pub fn create_decoder(dex_type: DexType) -> Box<dyn DexDecoder> {
     match dex_type {
         DexType::PumpFun => Box::new(pumpfun::PumpFunDecoder),
         DexType::Raydium => Box::new(raydium::RaydiumDecoder),
+        DexType::PumpSwap => Box::new(pumpswap::PumpSwapDecoder),
     }
 }
 

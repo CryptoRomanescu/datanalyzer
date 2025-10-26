@@ -4,6 +4,7 @@
 pub mod config;
 pub mod csv_writer;
 pub mod dex;
+pub mod discovery;
 pub mod error;
 pub mod healthcheck;
 pub mod liquidity;

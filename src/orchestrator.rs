@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::config::PoolConfig;
 use crate::csv_writer::{CsvWriter, CsvWriterConfig};
-use crate::dex::{pumpfun::PumpFunDecoder, raydium::RaydiumDecoder, DexDecoder};
+use crate::dex::{pumpfun::PumpFunDecoder, pumpswap::PumpSwapDecoder, raydium::RaydiumDecoder, DexDecoder};
 use crate::error::AppError;
 use crate::models::{DexType, PoolSnapshot};
 use crate::oracle::Oracle;
@@ -161,6 +161,71 @@ impl Orchestrator {
                         quote_decimals,
                         &base_mint.to_string(),
                         quote_mint,
+                    )
+                    .await
+                    .unwrap_or(0.0);
+
+                let snapshot = PoolSnapshot::with_liquidity(
+                    update.pool.to_string(),
+                    base_mint.to_string(),
+                    *dex,
+                    reserve_base,
+                    reserve_quote,
+                    chrono::Utc::now().timestamp(),
+                    price,
+                    liquidity_usd,
+                )?;
+
+                tx_snap
+                    .send(SnapshotRecord {
+                        snapshot,
+                        dex_type: *dex,
+                    })
+                    .await
+                    .map_err(|e| AppError::CsvError(format!("Send snapshot error: {}", e)))?;
+            }
+
+            DexType::PumpSwap => {
+                let decoder = PumpSwapDecoder;
+                decoder.validate_account(&update.account_data)?;
+                let (reserve_base, reserve_quote) =
+                    decoder.decode_reserves(&update.account_data)?;
+
+                // Extract mint addresses from pool data
+                let base_mint = PumpSwapDecoder::extract_base_mint(&update.account_data)?;
+                let quote_mint = PumpSwapDecoder::extract_quote_mint(&update.account_data)?;
+
+                // Fetch decimals
+                let base_decimals = self
+                    .metadata_provider
+                    .get_decimals(&base_mint.to_string())
+                    .await
+                    .unwrap_or(9);
+                let quote_decimals = self
+                    .metadata_provider
+                    .get_decimals(&quote_mint.to_string())
+                    .await
+                    .unwrap_or(9);
+
+                // Compute price: price_base_in_quote = (quote_amount / 10^dec_quote) / (base_amount / 10^dec_base)
+                let price = if reserve_base > 0 {
+                    let quote_normalized =
+                        reserve_quote as f64 / 10_f64.powi(quote_decimals as i32);
+                    let base_normalized = reserve_base as f64 / 10_f64.powi(base_decimals as i32);
+                    quote_normalized / base_normalized
+                } else {
+                    0.0
+                };
+
+                // Compute liquidity_usd using Oracle
+                let liquidity_usd = self
+                    .compute_liquidity_usd(
+                        reserve_base,
+                        reserve_quote,
+                        base_decimals,
+                        quote_decimals,
+                        &base_mint.to_string(),
+                        &quote_mint.to_string(),
                     )
                     .await
                     .unwrap_or(0.0);
