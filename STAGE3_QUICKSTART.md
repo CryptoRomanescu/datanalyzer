@@ -80,6 +80,7 @@ Load and use:
 use datanalyzer::AppConfig;
 
 let config = AppConfig::load("config.toml")?;
+// Note: batch_size moved from persistence to csv config in recent versions
 println!("Batch size: {}", config.csv.batch_size);
 ```
 

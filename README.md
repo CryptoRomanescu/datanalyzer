@@ -167,7 +167,7 @@ First update for pool 58oQ...: owner=675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp
 ✓ Verified Raydium AMM v4 program for pool 58oQ...
 ```
 
-**Why this matters**: Raydium has multiple program versions (AMM v4, CLMM v5). The resolver ensures you're using AMM v4 pools (752 bytes, program `675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8`), not CLMM pools which have different structure.
+**Why this matters**: Raydium has multiple program versions (AMM v4, CLMM v5). The resolver ensures you're using AMM v4 pools (752 bytes), not CLMM pools which have different structure. The expected program ID is available as `RAYDIUM_AMM_V4_PROGRAM_ID` constant in the codebase.
 
 #### Pool Discovery Configuration
 

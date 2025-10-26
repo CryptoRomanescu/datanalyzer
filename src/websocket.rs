@@ -54,6 +54,7 @@
 //! ```
 
 use crate::config::PoolConfig;
+use crate::dex::raydium::RAYDIUM_AMM_V4_PROGRAM_ID;
 use crate::error::AppError;
 use crate::metrics::WebSocketMetrics;
 use solana_account_decoder::UiAccountEncoding;
@@ -474,15 +475,14 @@ impl WebSocketManager {
                     );
                     
                     // Verify it's a Raydium AMM v4 pool
-                    const RAYDIUM_AMM_V4_PROGRAM: &str = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8";
-                    if owner == RAYDIUM_AMM_V4_PROGRAM {
+                    if owner == RAYDIUM_AMM_V4_PROGRAM_ID {
                         tracing::info!("✓ Verified Raydium AMM v4 program for pool {}", pool_address);
                     } else {
                         tracing::warn!(
                             "⚠ Pool {} owner {} is not Raydium AMM v4 (expected {})",
                             pool_address,
                             owner,
-                            RAYDIUM_AMM_V4_PROGRAM
+                            RAYDIUM_AMM_V4_PROGRAM_ID
                         );
                     }
                     first_logged.insert(pool_address);

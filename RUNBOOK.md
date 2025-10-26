@@ -324,7 +324,7 @@ curl -s -X POST https://api.mainnet-beta.solana.com \
 #   "owner": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
 #   "size": 1004
 # }
-# Note: Base64-encoded size ≠ raw bytes. 1004 base64 chars ≈ 752 bytes
+# Note: Base64 encoding adds ~33% overhead: 752 raw bytes = 1004 base64 characters (4:3 ratio)
 ```
 
 **Using Raydium Resolver to find pools**:

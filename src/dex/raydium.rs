@@ -42,6 +42,9 @@ use crate::error::AppError;
 use bytemuck::{Pod, Zeroable};
 use solana_sdk::pubkey::Pubkey;
 
+/// Raydium AMM V4 program ID on Solana mainnet
+pub const RAYDIUM_AMM_V4_PROGRAM_ID: &str = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8";
+
 /// Fee structure for Raydium AMM pools.
 ///
 /// Contains various fee ratios used in AMM operations:

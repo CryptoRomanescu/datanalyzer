@@ -25,7 +25,11 @@ pub use config::{
     RaydiumResolverConfig, RetryConfig, RuntimeConfig,
 };
 pub use csv_writer::{CsvWriter, CsvWriterConfig};
-pub use dex::{create_decoder, DecoderRegistry, DecoderStats, DexDecoder};
+pub use dex::{
+    create_decoder,
+    raydium::RAYDIUM_AMM_V4_PROGRAM_ID,
+    DecoderRegistry, DecoderStats, DexDecoder,
+};
 pub use error::AppError;
 pub use healthcheck::{AppState, HealthResponse, ReadinessResponse};
 pub use metrics::WebSocketMetrics;
