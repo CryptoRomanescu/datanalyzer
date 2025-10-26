@@ -336,6 +336,44 @@ impl Default for DiscoveryConfig {
     }
 }
 
+/// Configuration for Raydium pool address resolver
+#[derive(Debug, Clone, Deserialize)]
+pub struct RaydiumResolverConfig {
+    /// Enable Raydium pool address resolver
+    #[serde(default = "default_resolver_enabled")]
+    pub enabled: bool,
+
+    /// Raydium API URL
+    #[serde(default = "default_raydium_api_url")]
+    pub api_url: String,
+
+    /// Request timeout in seconds
+    #[serde(default = "default_resolver_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+fn default_resolver_enabled() -> bool {
+    true
+}
+
+fn default_raydium_api_url() -> String {
+    "https://api.raydium.io/v2/sdk/liquidity/mainnet.json".to_string()
+}
+
+fn default_resolver_timeout_secs() -> u64 {
+    10
+}
+
+impl Default for RaydiumResolverConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_resolver_enabled(),
+            api_url: default_raydium_api_url(),
+            timeout_secs: default_resolver_timeout_secs(),
+        }
+    }
+}
+
 /// Application configuration loaded from TOML
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
@@ -360,6 +398,8 @@ pub struct AppConfig {
     pub token_mapping: Vec<TokenMappingEntry>,
     #[serde(default)]
     pub discovery: DiscoveryConfig,
+    #[serde(default)]
+    pub raydium_resolver: RaydiumResolverConfig,
 }
 
 impl AppConfig {
@@ -469,6 +509,7 @@ impl AppConfig {
             oracle: self.oracle,
             token_mapping: self.token_mapping,
             discovery: self.discovery,
+            raydium_resolver: self.raydium_resolver,
         })
     }
 }
@@ -489,6 +530,7 @@ pub struct RuntimeConfig {
     pub oracle: OracleConfig,
     pub token_mapping: Vec<TokenMappingEntry>,
     pub discovery: DiscoveryConfig,
+    pub raydium_resolver: RaydiumResolverConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -639,6 +681,7 @@ mod tests {
             oracle: OracleConfig::default(),
             token_mapping: vec![],
             discovery: DiscoveryConfig::default(),
+            raydium_resolver: RaydiumResolverConfig::default(),
         }
     }
 
