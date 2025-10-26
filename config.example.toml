@@ -103,3 +103,29 @@ token_mint = "So11111111111111111111111111111111111111112"
 pool_address = "CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM"
 dex_type = "pumpfun"
 token_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+
+# Pool Discovery Configuration
+[discovery]
+# Enable automatic PumpSwap pool discovery (default: false)
+enable_pumpswap = true
+
+# PumpSwap AMM program ID (default: pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA)
+pumpswap_program_id = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
+
+# Quote token allowlist - only pools with these quote mints will be subscribed
+# Default: USDC, USDT, SOL
+quote_allowlist = [
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", # USDC
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", # USDT
+  "So11111111111111111111111111111111111111112",  # SOL
+]
+
+# Minimum quote liquidity to subscribe to a pool (in base units, default: 1000.0)
+min_quote_liquidity = 1000.0
+
+# Maximum number of pools to track (default: 2000)
+max_pools = 2000
+
+# Interval between rescans in seconds (default: 300 = 5 minutes)
+rescan_interval_secs = 300
+

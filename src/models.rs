@@ -7,6 +7,7 @@ use std::str::FromStr;
 pub enum DexType {
     PumpFun,
     Raydium,
+    PumpSwap,
 }
 
 impl FromStr for DexType {
@@ -16,6 +17,7 @@ impl FromStr for DexType {
         match s.to_lowercase().as_str() {
             "pumpfun" | "pump_fun" => Ok(DexType::PumpFun),
             "raydium" => Ok(DexType::Raydium),
+            "pumpswap" | "pump_swap" => Ok(DexType::PumpSwap),
             _ => Err(AppError::ConfigError(format!("Unknown DEX type: {}", s))),
         }
     }
@@ -26,6 +28,7 @@ impl fmt::Display for DexType {
         match self {
             DexType::PumpFun => write!(f, "PumpFun"),
             DexType::Raydium => write!(f, "Raydium"),
+            DexType::PumpSwap => write!(f, "PumpSwap"),
         }
     }
 }
@@ -35,6 +38,7 @@ impl DexType {
         match self {
             DexType::PumpFun => 256,
             DexType::Raydium => 752,
+            DexType::PumpSwap => 324, // PumpSwap AMM pool account size
         }
     }
 }

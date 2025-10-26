@@ -1,13 +1,14 @@
 # DataAnalyzer
 
-A high-performance, production-ready Solana pool data analyzer supporting Raydium and Pump.fun DEXes. Real-time WebSocket monitoring, price fetching from multiple sources, CSV export, and comprehensive observability.
+A high-performance, production-ready Solana pool data analyzer supporting Raydium, Pump.fun, and PumpSwap DEXes. Real-time WebSocket monitoring, automatic pool discovery, price fetching from multiple sources, CSV export, and comprehensive observability.
 
 ## Features
 
 ### Core Functionality
-- **Multi-DEX Support**: Raydium AMM and Pump.fun pool monitoring
+- **Multi-DEX Support**: Raydium AMM, Pump.fun, and PumpSwap pool monitoring
+- **Automatic Pool Discovery**: Automatically discover and subscribe to PumpSwap pools without manual configuration
 - **WebSocket Monitoring**: Real-time pool state updates via Solana account subscriptions
-- **Reserve Resolution**: Automatic handling of direct reserves (Pump.fun) and vault-based reserves (Raydium)
+- **Reserve Resolution**: Automatic handling of direct reserves (Pump.fun, PumpSwap) and vault-based reserves (Raydium)
 - **Price Fetching**: Fallback chain Jupiter → CoinGecko with circuit breaker protection
 - **CSV Export**: Buffered CSV writing with automatic rotation and batching
 - **Liquidity Calculation**: On-chain liquidity computation with USD valuation
@@ -83,7 +84,31 @@ mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 coingecko_id = "usd-coin"
 cache_ttl_secs = 600
 
-# Pools to Monitor
+# Pool Discovery (Optional - PumpSwap Auto-Discovery)
+[discovery]
+# Enable automatic PumpSwap pool discovery (default: false)
+enable_pumpswap = true
+
+# PumpSwap AMM program ID
+pumpswap_program_id = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
+
+# Quote token allowlist - only pools with these quote mints will be subscribed
+quote_allowlist = [
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", # USDC
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", # USDT
+  "So11111111111111111111111111111111111111112",  # SOL
+]
+
+# Minimum quote liquidity to subscribe to a pool (in base units)
+min_quote_liquidity = 1000.0
+
+# Maximum number of pools to track
+max_pools = 2000
+
+# Interval between rescans in seconds (default: 300 = 5 minutes)
+rescan_interval_secs = 300
+
+# Pools to Monitor (Manual Configuration)
 [[pools]]
 pool_address = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"  # SOL/USDC Raydium
 dex_type = "raydium"
@@ -106,6 +131,31 @@ The `[csv]` section controls CSV file writing behavior with support for rotation
 - **`batch_time_ms`** (u64): Maximum time in milliseconds between flushes. Even if `batch_size` isn't reached, data is flushed after this interval. Set to `0` to disable time-based flushing. Default: `3000` (3 seconds)
 
 **File Rotation**: When rotation is triggered (by size or age), the current file is renamed to `{basename}_{timestamp}.csv` (e.g., `raydium_58oQChx4.csv` → `raydium_58oQChx4_1730000000.csv`) and a new file with the original name is created with headers.
+
+#### Pool Discovery Configuration
+
+The `[discovery]` section enables automatic pool discovery for PumpSwap:
+
+- **`enable_pumpswap`** (bool): Enable automatic PumpSwap pool discovery. Default: `false`
+- **`pumpswap_program_id`** (string): The program ID of the PumpSwap AMM. Default: `"pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"`
+- **`quote_allowlist`** (array): List of quote token mint addresses to filter pools by. Only pools with these quote tokens will be discovered and subscribed. Default: `[USDC, USDT, SOL]`
+- **`min_quote_liquidity`** (f64): Minimum quote token liquidity (in base units) for a pool to be subscribed. Default: `1000.0`
+- **`max_pools`** (usize): Maximum number of pools to discover and track. Default: `2000`
+- **`rescan_interval_secs`** (u64): Interval between pool rescans in seconds (for future live discovery). Default: `300` (5 minutes)
+
+**Discovery Process**:
+1. **Backfill**: On startup, the service queries all PumpSwap program accounts and filters them by:
+   - Account size (324 bytes for PumpSwap pools)
+   - Quote mint in the allowlist
+   - Minimum quote liquidity threshold
+2. **Subscription**: Filtered pools are automatically registered with the orchestrator and subscribed via WebSocket
+3. **No Manual Mapping**: You don't need to know token mints or pool addresses - discovery is fully automatic
+
+**Example**: With `enable_pumpswap = true` and default settings, the service will:
+- Find all PumpSwap pools with SOL, USDC, or USDT as quote token
+- Filter out pools with less than 1000 base units of quote liquidity
+- Subscribe to up to 2000 pools automatically
+- Monitor them in real-time via WebSocket
 
 ### Running
 
