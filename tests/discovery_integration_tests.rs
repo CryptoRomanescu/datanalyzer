@@ -9,7 +9,7 @@ use solana_sdk::pubkey::Pubkey;
 async fn test_discovery_config_defaults() {
     let config = DiscoveryConfig::default();
     
-    assert_eq!(config.enable_pumpswap, false);
+    assert!(!config.enable_pumpswap);
     assert_eq!(config.pumpswap_program_id, "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA");
     assert_eq!(config.quote_allowlist.len(), 3); // USDC, USDT, SOL
     assert_eq!(config.min_quote_liquidity, 1000.0);
@@ -142,7 +142,7 @@ fn test_pumpswap_dex_type() {
 async fn test_discovery_disabled_skips_backfill() {
     let config = DiscoveryConfig {
         enable_pumpswap: false,
-        ..Default::default()
+        ..DiscoveryConfig::default()
     };
 
     let discovery = PoolDiscovery::new(config, "https://api.mainnet-beta.solana.com".to_string())
