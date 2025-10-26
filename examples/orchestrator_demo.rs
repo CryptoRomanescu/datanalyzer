@@ -1,13 +1,12 @@
+use datanalyzer::dex::pumpfun::PumpFunDecoder;
 /// Example demonstrating the Raydium orchestrator usage.
 ///
 /// This example shows how to:
 /// 1. Decode Raydium AmmInfo to get vault information
 /// 2. Use the orchestrator to fetch actual reserves from vault accounts
 /// 3. Handle both direct (Pump.fun) and vault-based (Raydium) reserves
-
-use datanalyzer::dex::raydium::{RaydiumDecoder, AmmInfo};
-use datanalyzer::dex::pumpfun::PumpFunDecoder;
-use datanalyzer::orchestrator::{ReserveOrchestrator, ReserveInfo};
+use datanalyzer::dex::raydium::{AmmInfo, RaydiumDecoder};
+use datanalyzer::orchestrator::{ReserveInfo, ReserveOrchestrator};
 use solana_sdk::pubkey::Pubkey;
 
 fn main() {
@@ -50,19 +49,21 @@ fn example_raydium_pool() {
     match decoder.decode_reserve_info(&account_data) {
         Ok(reserve_info) => {
             println!("✓ Decoded AmmInfo successfully");
-            
+
             match reserve_info {
                 ReserveInfo::RequiresVaults(vault_info) => {
                     println!("  Coin vault: {}", vault_info.coin_vault);
                     println!("  PC vault: {}", vault_info.pc_vault);
                     println!("  Coin mint: {}", vault_info.coin_mint);
                     println!("  PC mint: {}", vault_info.pc_mint);
-                    
+
                     // Step 2: Use orchestrator to fetch reserves
                     // Note: In this example, RPC would fail since these are mock accounts
                     println!("\n  To fetch actual reserves, use:");
                     println!("    let orchestrator = ReserveOrchestrator::new(rpc_url);");
-                    println!("    let (base, quote) = orchestrator.resolve_reserves(&reserve_info)?;");
+                    println!(
+                        "    let (base, quote) = orchestrator.resolve_reserves(&reserve_info)?;"
+                    );
                 }
                 _ => println!("✗ Unexpected reserve info type"),
             }
@@ -90,14 +91,15 @@ fn example_pumpfun_pool() {
     match decoder.decode_reserve_info(&account_data) {
         Ok(reserve_info) => {
             println!("✓ Decoded Pump.fun account successfully");
-            
+
             match reserve_info {
                 ReserveInfo::Direct { base, quote } => {
                     println!("  Token reserve: {}", base);
                     println!("  SOL reserve: {} lamports", quote);
-                    
+
                     // For direct reserves, orchestrator returns them immediately
-                    let orchestrator = ReserveOrchestrator::new("https://api.mainnet-beta.solana.com".to_string());
+                    let orchestrator =
+                        ReserveOrchestrator::new("https://api.mainnet-beta.solana.com".to_string());
                     match orchestrator.resolve_reserves(&reserve_info) {
                         Ok((b, q)) => {
                             println!("\n✓ Resolved reserves:");
@@ -145,6 +147,6 @@ fn example_unified_handling() {
     // Test with vault-based reserves (would need real RPC in production)
     println!("\nProcessing vault-based reserves (Raydium):");
     println!("  (Would require real vault accounts and RPC in production)");
-    
+
     println!("\n{}\n", "=".repeat(50));
 }

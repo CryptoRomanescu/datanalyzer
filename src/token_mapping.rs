@@ -27,7 +27,7 @@ pub struct TokenMappingEntry {
 pub trait TokenMappingProvider: Send + Sync {
     /// Get the CoinGecko token ID for a given mint address
     async fn get_token_id(&self, mint: &str) -> Result<Option<String>, AppError>;
-    
+
     /// Get the custom cache TTL for a token, if configured
     async fn get_cache_ttl(&self, mint: &str) -> Option<u64>;
 }
@@ -41,33 +41,34 @@ impl StaticTokenMapping {
     /// Create a new static token mapping from a list of entries
     pub fn new(entries: Vec<TokenMappingEntry>) -> Result<Self, AppError> {
         let mut mappings = HashMap::new();
-        
+
         for entry in entries {
             // Validate mint address format (basic check - should be base58)
             if entry.mint.is_empty() {
                 return Err(AppError::ConfigError(
-                    "Token mint cannot be empty".to_string()
+                    "Token mint cannot be empty".to_string(),
                 ));
             }
-            
+
             // Validate CoinGecko ID format
             if entry.coingecko_id.is_empty() {
-                return Err(AppError::ConfigError(
-                    format!("CoinGecko ID cannot be empty for mint: {}", entry.mint)
-                ));
+                return Err(AppError::ConfigError(format!(
+                    "CoinGecko ID cannot be empty for mint: {}",
+                    entry.mint
+                )));
             }
-            
+
             mappings.insert(entry.mint.clone(), entry);
         }
-        
+
         Ok(Self { mappings })
     }
-    
+
     /// Get the number of configured mappings
     pub fn len(&self) -> usize {
         self.mappings.len()
     }
-    
+
     /// Check if the mapping is empty
     pub fn is_empty(&self) -> bool {
         self.mappings.is_empty()
@@ -77,11 +78,16 @@ impl StaticTokenMapping {
 #[async_trait::async_trait]
 impl TokenMappingProvider for StaticTokenMapping {
     async fn get_token_id(&self, mint: &str) -> Result<Option<String>, AppError> {
-        Ok(self.mappings.get(mint).map(|entry| entry.coingecko_id.clone()))
+        Ok(self
+            .mappings
+            .get(mint)
+            .map(|entry| entry.coingecko_id.clone()))
     }
-    
+
     async fn get_cache_ttl(&self, mint: &str) -> Option<u64> {
-        self.mappings.get(mint).and_then(|entry| entry.cache_ttl_secs)
+        self.mappings
+            .get(mint)
+            .and_then(|entry| entry.cache_ttl_secs)
     }
 }
 
@@ -100,13 +106,13 @@ impl TokenMappingService {
             cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    
+
     /// Create a service with a single static provider
     pub fn with_static_mapping(entries: Vec<TokenMappingEntry>) -> Result<Self, AppError> {
         let provider = Arc::new(StaticTokenMapping::new(entries)?);
         Ok(Self::new(vec![provider]))
     }
-    
+
     /// Get the CoinGecko token ID for a given mint address
     /// Checks cache first, then queries providers in order
     pub async fn get_token_id(&self, mint: &str) -> Result<Option<String>, AppError> {
@@ -117,7 +123,7 @@ impl TokenMappingService {
                 return Ok(cached_id.clone());
             }
         }
-        
+
         // Query providers in order
         for provider in &self.providers {
             match provider.get_token_id(mint).await {
@@ -134,13 +140,13 @@ impl TokenMappingService {
                 }
             }
         }
-        
+
         // No provider had a mapping, cache the negative result
         let mut cache = self.cache.write().await;
         cache.insert(mint.to_string(), None);
         Ok(None)
     }
-    
+
     /// Get the custom cache TTL for a token from any provider
     pub async fn get_cache_ttl(&self, mint: &str) -> Option<u64> {
         for provider in &self.providers {
@@ -150,13 +156,13 @@ impl TokenMappingService {
         }
         None
     }
-    
+
     /// Clear the internal cache
     pub async fn clear_cache(&self) {
         let mut cache = self.cache.write().await;
         cache.clear();
     }
-    
+
     /// Get the number of cached entries
     pub async fn cache_size(&self) -> usize {
         let cache = self.cache.read().await;
@@ -175,7 +181,7 @@ mod tests {
             coingecko_id: "solana".to_string(),
             cache_ttl_secs: None,
         };
-        
+
         assert_eq!(entry.mint, "So11111111111111111111111111111111111111112");
         assert_eq!(entry.coingecko_id, "solana");
         assert_eq!(entry.cache_ttl_secs, None);
@@ -188,7 +194,7 @@ mod tests {
             coingecko_id: "usd-coin".to_string(),
             cache_ttl_secs: Some(600),
         };
-        
+
         assert_eq!(entry.cache_ttl_secs, Some(600));
     }
 
@@ -206,7 +212,7 @@ mod tests {
                 cache_ttl_secs: Some(600),
             },
         ];
-        
+
         let mapping = StaticTokenMapping::new(entries).unwrap();
         assert_eq!(mapping.len(), 2);
         assert!(!mapping.is_empty());
@@ -214,155 +220,149 @@ mod tests {
 
     #[test]
     fn test_static_token_mapping_empty_mint() {
-        let entries = vec![
-            TokenMappingEntry {
-                mint: "".to_string(),
-                coingecko_id: "solana".to_string(),
-                cache_ttl_secs: None,
-            },
-        ];
-        
+        let entries = vec![TokenMappingEntry {
+            mint: "".to_string(),
+            coingecko_id: "solana".to_string(),
+            cache_ttl_secs: None,
+        }];
+
         let result = StaticTokenMapping::new(entries);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_static_token_mapping_empty_coingecko_id() {
-        let entries = vec![
-            TokenMappingEntry {
-                mint: "So11111111111111111111111111111111111111112".to_string(),
-                coingecko_id: "".to_string(),
-                cache_ttl_secs: None,
-            },
-        ];
-        
+        let entries = vec![TokenMappingEntry {
+            mint: "So11111111111111111111111111111111111111112".to_string(),
+            coingecko_id: "".to_string(),
+            cache_ttl_secs: None,
+        }];
+
         let result = StaticTokenMapping::new(entries);
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn test_static_token_mapping_get_token_id() {
-        let entries = vec![
-            TokenMappingEntry {
-                mint: "So11111111111111111111111111111111111111112".to_string(),
-                coingecko_id: "solana".to_string(),
-                cache_ttl_secs: None,
-            },
-        ];
-        
+        let entries = vec![TokenMappingEntry {
+            mint: "So11111111111111111111111111111111111111112".to_string(),
+            coingecko_id: "solana".to_string(),
+            cache_ttl_secs: None,
+        }];
+
         let mapping = StaticTokenMapping::new(entries).unwrap();
-        let result = mapping.get_token_id("So11111111111111111111111111111111111111112").await;
-        
+        let result = mapping
+            .get_token_id("So11111111111111111111111111111111111111112")
+            .await;
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Some("solana".to_string()));
     }
 
     #[tokio::test]
     async fn test_static_token_mapping_get_token_id_not_found() {
-        let entries = vec![
-            TokenMappingEntry {
-                mint: "So11111111111111111111111111111111111111112".to_string(),
-                coingecko_id: "solana".to_string(),
-                cache_ttl_secs: None,
-            },
-        ];
-        
+        let entries = vec![TokenMappingEntry {
+            mint: "So11111111111111111111111111111111111111112".to_string(),
+            coingecko_id: "solana".to_string(),
+            cache_ttl_secs: None,
+        }];
+
         let mapping = StaticTokenMapping::new(entries).unwrap();
         let result = mapping.get_token_id("UnknownMint").await;
-        
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
     }
 
     #[tokio::test]
     async fn test_static_token_mapping_get_cache_ttl() {
-        let entries = vec![
-            TokenMappingEntry {
-                mint: "So11111111111111111111111111111111111111112".to_string(),
-                coingecko_id: "solana".to_string(),
-                cache_ttl_secs: Some(300),
-            },
-        ];
-        
+        let entries = vec![TokenMappingEntry {
+            mint: "So11111111111111111111111111111111111111112".to_string(),
+            coingecko_id: "solana".to_string(),
+            cache_ttl_secs: Some(300),
+        }];
+
         let mapping = StaticTokenMapping::new(entries).unwrap();
-        let ttl = mapping.get_cache_ttl("So11111111111111111111111111111111111111112").await;
-        
+        let ttl = mapping
+            .get_cache_ttl("So11111111111111111111111111111111111111112")
+            .await;
+
         assert_eq!(ttl, Some(300));
     }
 
     #[tokio::test]
     async fn test_static_token_mapping_get_cache_ttl_none() {
-        let entries = vec![
-            TokenMappingEntry {
-                mint: "So11111111111111111111111111111111111111112".to_string(),
-                coingecko_id: "solana".to_string(),
-                cache_ttl_secs: None,
-            },
-        ];
-        
+        let entries = vec![TokenMappingEntry {
+            mint: "So11111111111111111111111111111111111111112".to_string(),
+            coingecko_id: "solana".to_string(),
+            cache_ttl_secs: None,
+        }];
+
         let mapping = StaticTokenMapping::new(entries).unwrap();
-        let ttl = mapping.get_cache_ttl("So11111111111111111111111111111111111111112").await;
-        
+        let ttl = mapping
+            .get_cache_ttl("So11111111111111111111111111111111111111112")
+            .await;
+
         assert_eq!(ttl, None);
     }
 
     #[tokio::test]
     async fn test_token_mapping_service_with_static() {
-        let entries = vec![
-            TokenMappingEntry {
-                mint: "So11111111111111111111111111111111111111112".to_string(),
-                coingecko_id: "solana".to_string(),
-                cache_ttl_secs: None,
-            },
-        ];
-        
+        let entries = vec![TokenMappingEntry {
+            mint: "So11111111111111111111111111111111111111112".to_string(),
+            coingecko_id: "solana".to_string(),
+            cache_ttl_secs: None,
+        }];
+
         let service = TokenMappingService::with_static_mapping(entries).unwrap();
-        let result = service.get_token_id("So11111111111111111111111111111111111111112").await;
-        
+        let result = service
+            .get_token_id("So11111111111111111111111111111111111111112")
+            .await;
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Some("solana".to_string()));
     }
 
     #[tokio::test]
     async fn test_token_mapping_service_caching() {
-        let entries = vec![
-            TokenMappingEntry {
-                mint: "So11111111111111111111111111111111111111112".to_string(),
-                coingecko_id: "solana".to_string(),
-                cache_ttl_secs: None,
-            },
-        ];
-        
+        let entries = vec![TokenMappingEntry {
+            mint: "So11111111111111111111111111111111111111112".to_string(),
+            coingecko_id: "solana".to_string(),
+            cache_ttl_secs: None,
+        }];
+
         let service = TokenMappingService::with_static_mapping(entries).unwrap();
-        
+
         // First call - populates cache
-        let result1 = service.get_token_id("So11111111111111111111111111111111111111112").await;
+        let result1 = service
+            .get_token_id("So11111111111111111111111111111111111111112")
+            .await;
         assert_eq!(result1.unwrap(), Some("solana".to_string()));
         assert_eq!(service.cache_size().await, 1);
-        
+
         // Second call - should use cache
-        let result2 = service.get_token_id("So11111111111111111111111111111111111111112").await;
+        let result2 = service
+            .get_token_id("So11111111111111111111111111111111111111112")
+            .await;
         assert_eq!(result2.unwrap(), Some("solana".to_string()));
         assert_eq!(service.cache_size().await, 1);
     }
 
     #[tokio::test]
     async fn test_token_mapping_service_cache_negative_result() {
-        let entries = vec![
-            TokenMappingEntry {
-                mint: "So11111111111111111111111111111111111111112".to_string(),
-                coingecko_id: "solana".to_string(),
-                cache_ttl_secs: None,
-            },
-        ];
-        
+        let entries = vec![TokenMappingEntry {
+            mint: "So11111111111111111111111111111111111111112".to_string(),
+            coingecko_id: "solana".to_string(),
+            cache_ttl_secs: None,
+        }];
+
         let service = TokenMappingService::with_static_mapping(entries).unwrap();
-        
+
         // Look up non-existent mint
         let result1 = service.get_token_id("UnknownMint").await;
         assert_eq!(result1.unwrap(), None);
         assert_eq!(service.cache_size().await, 1);
-        
+
         // Second lookup should use cached negative result
         let result2 = service.get_token_id("UnknownMint").await;
         assert_eq!(result2.unwrap(), None);
@@ -371,20 +371,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_token_mapping_service_clear_cache() {
-        let entries = vec![
-            TokenMappingEntry {
-                mint: "So11111111111111111111111111111111111111112".to_string(),
-                coingecko_id: "solana".to_string(),
-                cache_ttl_secs: None,
-            },
-        ];
-        
+        let entries = vec![TokenMappingEntry {
+            mint: "So11111111111111111111111111111111111111112".to_string(),
+            coingecko_id: "solana".to_string(),
+            cache_ttl_secs: None,
+        }];
+
         let service = TokenMappingService::with_static_mapping(entries).unwrap();
-        
+
         // Populate cache
-        let _ = service.get_token_id("So11111111111111111111111111111111111111112").await;
+        let _ = service
+            .get_token_id("So11111111111111111111111111111111111111112")
+            .await;
         assert_eq!(service.cache_size().await, 1);
-        
+
         // Clear cache
         service.clear_cache().await;
         assert_eq!(service.cache_size().await, 0);
@@ -392,17 +392,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_token_mapping_service_get_cache_ttl() {
-        let entries = vec![
-            TokenMappingEntry {
-                mint: "So11111111111111111111111111111111111111112".to_string(),
-                coingecko_id: "solana".to_string(),
-                cache_ttl_secs: Some(600),
-            },
-        ];
-        
+        let entries = vec![TokenMappingEntry {
+            mint: "So11111111111111111111111111111111111111112".to_string(),
+            coingecko_id: "solana".to_string(),
+            cache_ttl_secs: Some(600),
+        }];
+
         let service = TokenMappingService::with_static_mapping(entries).unwrap();
-        let ttl = service.get_cache_ttl("So11111111111111111111111111111111111111112").await;
-        
+        let ttl = service
+            .get_cache_ttl("So11111111111111111111111111111111111111112")
+            .await;
+
         assert_eq!(ttl, Some(600));
     }
 }

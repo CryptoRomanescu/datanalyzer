@@ -1,19 +1,19 @@
 #![allow(dead_code)]
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::env;
 use std::error::Error;
 use std::sync::Arc;
+use std::time::Duration;
 
 use datanalyzer::config::AppConfig;
-use datanalyzer::price_fetcher::PriceFetcher;
+use datanalyzer::oracle::{JupiterQuoteOracle, OracleConfig};
+use datanalyzer::orchestrator::{Orchestrator, PoolUpdate};
+use datanalyzer::token_metadata::TokenMetadataProvider;
 use datanalyzer::websocket::{AccountUpdateCallback, WebSocketManager};
 
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::mpsc;
-
-mod orchestrator;
-use orchestrator::{Orchestrator, PoolUpdate};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -22,7 +22,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Config path: --config <path> | DATANALYZER_CONFIG | ./config.toml
     let args: Vec<String> = env::args().collect();
-    let mut config_path = env::var("DATANALYZER_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
+    let mut config_path =
+        env::var("DATANALYZER_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
     if args.len() >= 3 && args[1] == "--config" {
         config_path = args[2].clone();
     }
@@ -31,34 +32,43 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let app_cfg = AppConfig::load(&config_path)?;
     let runtime_cfg = app_cfg.into_runtime_config()?;
 
-    // Build token mapping from config
-    let mut token_map = HashMap::new();
-    for mapping in &runtime_cfg.token_mapping {
-        if let Ok(pubkey) = mapping.mint.parse::<Pubkey>() {
-            token_map.insert(pubkey, mapping.coingecko_id.clone());
-        }
+    // Build Oracle from configuration
+    let mut stable_mints = HashSet::new();
+    for mint in &runtime_cfg.oracle.stable_mints {
+        stable_mints.insert(mint.clone());
     }
 
-    // Price fetcher (TTL można przenieść do configu)
-    let price_fetcher = Arc::new(PriceFetcher::new(std::time::Duration::from_secs(
-        runtime_cfg.price_fetcher.cache_ttl_secs,
-    )));
+    let oracle_config = OracleConfig {
+        stable_mints,
+        jupiter_url: runtime_cfg.oracle.jupiter_url.clone(),
+        cache_ttl_secs: runtime_cfg.oracle.cache_ttl_secs,
+    };
+    let oracle = Arc::new(JupiterQuoteOracle::new(oracle_config));
+
+    // Token metadata provider for decimal caching
+    let metadata_provider = Arc::new(TokenMetadataProvider::new(
+        runtime_cfg.rpc_url.clone(),
+        Duration::from_secs(3600), // 1 hour TTL for decimals (they never change)
+    ));
 
     // Convert CsvConfig to CsvWriterConfig
     let csv_writer_config = runtime_cfg.csv.to_csv_writer_config();
 
-    // Orchestrator: RPC (HTTP), compute, CSV; przekazujemy mapę mint->coingecko z configu
+    // Orchestrator: RPC (HTTP), compute, CSV
     let orch = Arc::new(Orchestrator::new(
         runtime_cfg.rpc_url.clone(),
-        Arc::clone(&price_fetcher),
+        oracle as Arc<dyn datanalyzer::oracle::Oracle>,
+        Arc::clone(&metadata_provider),
         &runtime_cfg.output_dir,
         &runtime_cfg.pools,
-        token_map,
         csv_writer_config,
     ));
 
-    // WebSocket + połączenie
-    let mut ws = WebSocketManager::new(runtime_cfg.rpc_ws_url.clone(), runtime_cfg.snapshot_interval_ms);
+    // WebSocket + connect
+    let mut ws = WebSocketManager::new(
+        runtime_cfg.rpc_ws_url.clone(),
+        runtime_cfg.snapshot_interval_ms,
+    );
     if let Err(e) = ws.connect().await {
         log::warn!("WS connect failed: {}. Retrying with reconnect loop...", e);
         if let Err(e2) = ws.reconnect_loop(Some(3)).await {
@@ -66,7 +76,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // Kolejka aktualizacji i uruchomienie orchestratora z workerami
+    // Update queue and start orchestrator with workers
     let (tx, rx) = mpsc::channel::<PoolUpdate>(1024);
     let workers = 4usize;
     let orch_task = {
@@ -78,24 +88,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
         })
     };
 
-    // Callback: push do kolejki
+    // Callback: push to queue
     let tx_cb = tx.clone();
-    let callback: AccountUpdateCallback = Arc::new(move |pool: Pubkey, data: Vec<u8>, slot: u64| {
-        let tx_inner = tx_cb.clone();
-        let update = PoolUpdate {
-            pool,
-            slot,
-            account_data: data,
-        };
-        tokio::spawn(async move {
-            if let Err(e) = tx_inner.send(update).await {
-                log::warn!("Dropping update (queue full?): {}", e);
-            }
+    let callback: AccountUpdateCallback =
+        Arc::new(move |pool: Pubkey, data: Vec<u8>, slot: u64| {
+            let tx_inner = tx_cb.clone();
+            let update = PoolUpdate {
+                pool,
+                slot,
+                account_data: data,
+            };
+            tokio::spawn(async move {
+                if let Err(e) = tx_inner.send(update).await {
+                    log::warn!("Dropping update (queue full?): {}", e);
+                }
+            });
         });
-    });
 
-    // Start nasłuchu
-    let pools: Vec<Pubkey> = runtime_cfg.pools.iter().map(|p| *p.pool_address()).collect();
+    // Start listening
+    let pools: Vec<Pubkey> = runtime_cfg
+        .pools
+        .iter()
+        .map(|p| *p.pool_address())
+        .collect();
     ws.listen(&pools, callback, 30).await?;
 
     log::info!(

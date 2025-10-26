@@ -5,7 +5,6 @@
 /// - Start healthcheck server
 /// - Monitor connection health
 /// - Export Prometheus metrics
-
 use datanalyzer::{healthcheck, metrics::WebSocketMetrics, websocket::WebSocketManager};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -57,14 +56,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // In a real application, you would subscribe to pools here
             // For demo, we'll just show the connection is working
-            
+
             // Keep the program running to allow checking the endpoints
             tracing::info!("Demo running. Press Ctrl+C to exit.");
             tracing::info!("Try accessing the health endpoints:");
             tracing::info!("  curl http://localhost:3000/health");
             tracing::info!("  curl http://localhost:3000/ready");
             tracing::info!("  curl http://localhost:3000/metrics");
-            
+
             tokio::signal::ctrl_c().await?;
             tracing::info!("Shutting down...");
         }

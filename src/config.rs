@@ -228,6 +228,45 @@ impl Default for PriceFetcherConfig {
     }
 }
 
+/// Configuration for Oracle price fetching
+#[derive(Debug, Clone, Deserialize)]
+pub struct OracleConfig {
+    /// List of stable coin mints (e.g., USDC, USDT) valued at $1.0
+    #[serde(default = "default_stable_mints")]
+    pub stable_mints: Vec<String>,
+    /// Jupiter API URL
+    #[serde(default = "default_jupiter_url")]
+    pub jupiter_url: String,
+    /// Cache TTL in seconds (default: 60)
+    #[serde(default = "default_oracle_cache_ttl_secs")]
+    pub cache_ttl_secs: u64,
+}
+
+fn default_stable_mints() -> Vec<String> {
+    vec![
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(), // USDC
+        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB".to_string(), // USDT
+    ]
+}
+
+fn default_jupiter_url() -> String {
+    "https://price.jup.ag/v4".to_string()
+}
+
+fn default_oracle_cache_ttl_secs() -> u64 {
+    60
+}
+
+impl Default for OracleConfig {
+    fn default() -> Self {
+        Self {
+            stable_mints: default_stable_mints(),
+            jupiter_url: default_jupiter_url(),
+            cache_ttl_secs: default_oracle_cache_ttl_secs(),
+        }
+    }
+}
+
 /// Application configuration loaded from TOML
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
@@ -246,6 +285,8 @@ pub struct AppConfig {
     pub rate_limit: RateLimitConfig,
     #[serde(default)]
     pub price_fetcher: PriceFetcherConfig,
+    #[serde(default)]
+    pub oracle: OracleConfig,
     #[serde(default)]
     pub token_mapping: Vec<TokenMappingEntry>,
 }
@@ -354,6 +395,7 @@ impl AppConfig {
             retry: self.retry,
             rate_limit: self.rate_limit,
             price_fetcher: self.price_fetcher,
+            oracle: self.oracle,
             token_mapping: self.token_mapping,
         })
     }
@@ -372,6 +414,7 @@ pub struct RuntimeConfig {
     pub retry: RetryConfig,
     pub rate_limit: RateLimitConfig,
     pub price_fetcher: PriceFetcherConfig,
+    pub oracle: OracleConfig,
     pub token_mapping: Vec<TokenMappingEntry>,
 }
 
@@ -515,10 +558,12 @@ mod tests {
             output_dir: output_dir.to_string(),
             snapshot_interval_ms,
             pools,
+            csv: CsvConfig::default(),
             persistence: PersistenceConfig::default(),
             retry: RetryConfig::default(),
             rate_limit: RateLimitConfig::default(),
             price_fetcher: PriceFetcherConfig::default(),
+            oracle: OracleConfig::default(),
             token_mapping: vec![],
         }
     }
@@ -685,7 +730,8 @@ mod tests {
 
     #[test]
     fn test_app_config_validation_empty_output_dir() {
-        let config = create_test_config("https://example.com", "wss://example.com", "", 1000, vec![]);
+        let config =
+            create_test_config("https://example.com", "wss://example.com", "", 1000, vec![]);
 
         let result = config.validate();
         assert!(result.is_err());
@@ -980,10 +1026,10 @@ token_mint = "{}"
         file.write_all(toml_content.as_bytes()).unwrap();
 
         let config = AppConfig::load(temp_path).unwrap();
-        
+
         // Custom value
         assert_eq!(config.persistence.batch_size, 250);
-        
+
         // Default values
         assert_eq!(config.persistence.max_file_size_bytes, 10 * 1024 * 1024);
         assert_eq!(config.retry.max_retries, 3);

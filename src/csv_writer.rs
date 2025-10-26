@@ -2,7 +2,6 @@
 ///
 /// Provides a buffered CSV writer with headers, proper flushing, append mode,
 /// directory creation, file rotation, and batching capabilities.
-
 use crate::error::AppError;
 use csv::Writer;
 use std::fs::{self, File, OpenOptions};
@@ -30,7 +29,7 @@ impl Default for CsvWriterConfig {
         Self {
             append: false,
             max_file_size: 10 * 1024 * 1024, // 10MB
-            max_file_age: 3600,                // 1 hour
+            max_file_age: 3600,              // 1 hour
             batch_size: 100,
             batch_time_ms: 5000, // 5 seconds
         }
@@ -165,9 +164,9 @@ impl CsvWriter {
 
         // Write headers only if needed
         if should_write_headers {
-            writer.write_record(headers).map_err(|e| {
-                AppError::IoError(format!("Failed to write CSV headers: {}", e))
-            })?;
+            writer
+                .write_record(headers)
+                .map_err(|e| AppError::IoError(format!("Failed to write CSV headers: {}", e)))?;
         }
 
         let now = SystemTime::now();
@@ -221,9 +220,8 @@ impl CsvWriter {
     fn should_rotate(&self) -> Result<bool, AppError> {
         // Check file size rotation
         if self.config.max_file_size > 0 {
-            let metadata = fs::metadata(&self.path).map_err(|e| {
-                AppError::IoError(format!("Failed to get file metadata: {}", e))
-            })?;
+            let metadata = fs::metadata(&self.path)
+                .map_err(|e| AppError::IoError(format!("Failed to get file metadata: {}", e)))?;
 
             if metadata.len() >= self.config.max_file_size {
                 return Ok(true);
@@ -317,7 +315,11 @@ impl CsvWriter {
             .to_str()
             .ok_or_else(|| AppError::IoError("Invalid UTF-8 in file stem".to_string()))?;
 
-        let extension = self.path.extension().and_then(|e| e.to_str()).unwrap_or("csv");
+        let extension = self
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("csv");
 
         let rotated_name = format!("{}_{}.{}", stem, timestamp, extension);
         let mut rotated_path = self.path.clone();
@@ -465,8 +467,8 @@ mod tests {
 
         // Create initial file
         {
-            let mut writer = CsvWriter::new(test_file, &["col1", "col2"])
-                .expect("Failed to create CSV writer");
+            let mut writer =
+                CsvWriter::new(test_file, &["col1", "col2"]).expect("Failed to create CSV writer");
             writer
                 .write_record(&["val1", "val2"])
                 .expect("Failed to write record");
@@ -641,7 +643,7 @@ mod tests {
         let config = CsvWriterConfig::builder()
             .batch_size(3)
             .max_file_size(0) // Disable rotation
-            .max_file_age(0)  // Disable rotation
+            .max_file_age(0) // Disable rotation
             .build();
 
         {
@@ -771,7 +773,13 @@ mod tests {
         {
             let mut writer = CsvWriter::with_config(
                 test_file,
-                &["timestamp", "pool", "reserve_base", "reserve_quote", "price"],
+                &[
+                    "timestamp",
+                    "pool",
+                    "reserve_base",
+                    "reserve_quote",
+                    "price",
+                ],
                 config,
             )
             .expect("Failed to create CSV writer");
@@ -806,10 +814,7 @@ mod tests {
             elapsed
         );
 
-        println!(
-            "Performance test: 10,000 records written in {:?}",
-            elapsed
-        );
+        println!("Performance test: 10,000 records written in {:?}", elapsed);
 
         // Clean up
         let _ = fs::remove_file(test_file);

@@ -750,10 +750,10 @@ mod tests {
         // Verify that Pubkey itself is Pod-safe
         fn assert_pod<T: bytemuck::Pod>() {}
         assert_pod::<Pubkey>();
-        
+
         // Verify Pubkey size is 32 bytes
         assert_eq!(std::mem::size_of::<Pubkey>(), 32);
-        
+
         // Verify Pubkey alignment is 1 (can be used in packed structs)
         assert_eq!(std::mem::align_of::<Pubkey>(), 1);
     }

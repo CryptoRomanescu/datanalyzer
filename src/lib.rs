@@ -9,6 +9,7 @@ pub mod healthcheck;
 pub mod liquidity;
 pub mod metrics;
 pub mod models;
+pub mod oracle;
 pub mod orchestrator;
 pub mod price_fetcher;
 pub mod price_provider;
@@ -27,12 +28,15 @@ pub use error::AppError;
 pub use healthcheck::{AppState, HealthResponse, ReadinessResponse};
 pub use metrics::WebSocketMetrics;
 pub use models::{DexType, PoolSnapshot};
-pub use orchestrator::Orchestrator;
+pub use oracle::{CachedPrice as OracleCachedPrice, JupiterQuoteOracle, Oracle, OracleConfig};
+pub use orchestrator::{Orchestrator, PoolUpdate};
 pub use price_fetcher::{CachedPrice, PriceFetcher, PriceFetcherMetrics};
 pub use price_provider::{
     CircuitBreaker, CircuitBreakerState, CoinGeckoPriceProvider, FallbackPriceProvider,
     JupiterPriceProvider, PriceProvider,
 };
-pub use token_mapping::{StaticTokenMapping, TokenMappingEntry, TokenMappingProvider, TokenMappingService};
+pub use token_mapping::{
+    StaticTokenMapping, TokenMappingEntry, TokenMappingProvider, TokenMappingService,
+};
 pub use token_metadata::{CachedMetadata, TokenMetadata, TokenMetadataProvider};
 pub use websocket::{ReconnectStrategy, WebSocketManager};

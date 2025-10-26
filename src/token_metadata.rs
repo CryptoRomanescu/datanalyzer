@@ -31,12 +31,12 @@ impl CachedMetadata {
             timestamp: Instant::now(),
         }
     }
-    
+
     /// Check if the cached metadata is expired
     pub fn is_expired(&self, ttl: Duration) -> bool {
         self.timestamp.elapsed() > ttl
     }
-    
+
     /// Get the age of the cached metadata
     pub fn age(&self) -> Duration {
         self.timestamp.elapsed()
@@ -62,14 +62,14 @@ impl TokenMetadataProvider {
     /// Create a new token metadata provider
     pub fn new(rpc_url: String, cache_ttl: Duration) -> Self {
         let rpc_client = Arc::new(RpcClient::new(rpc_url));
-        
+
         Self {
             rpc_client,
             cache: Arc::new(RwLock::new(HashMap::new())),
             cache_ttl,
         }
     }
-    
+
     /// Create a new provider with an existing RPC client
     pub fn with_client(rpc_client: Arc<RpcClient>, cache_ttl: Duration) -> Self {
         Self {
@@ -78,7 +78,7 @@ impl TokenMetadataProvider {
             cache_ttl,
         }
     }
-    
+
     /// Get token decimals for a mint address
     pub async fn get_decimals(&self, mint: &str) -> Result<u8, AppError> {
         // Check cache first
@@ -91,19 +91,19 @@ impl TokenMetadataProvider {
                 }
             }
         }
-        
+
         // Fetch from RPC
         let metadata = self.fetch_metadata_from_rpc(mint).await?;
-        
+
         // Update cache
         {
             let mut cache = self.cache.write().await;
             cache.insert(mint.to_string(), metadata.clone());
         }
-        
+
         Ok(metadata.decimals)
     }
-    
+
     /// Get full token metadata
     pub async fn get_metadata(&self, mint: &str) -> Result<TokenMetadata, AppError> {
         // Check cache first
@@ -120,35 +120,36 @@ impl TokenMetadataProvider {
                 }
             }
         }
-        
+
         // Fetch from RPC
         let metadata = self.fetch_metadata_from_rpc(mint).await?;
-        
+
         // Update cache
         {
             let mut cache = self.cache.write().await;
             cache.insert(mint.to_string(), metadata.clone());
         }
-        
+
         Ok(TokenMetadata {
             mint: mint.to_string(),
             decimals: metadata.decimals,
             supply: metadata.supply,
         })
     }
-    
+
     /// Fetch metadata from RPC
     async fn fetch_metadata_from_rpc(&self, mint: &str) -> Result<CachedMetadata, AppError> {
         let pubkey = Pubkey::from_str(mint)
             .map_err(|e| AppError::ConfigError(format!("Invalid mint address: {}", e)))?;
-        
+
         // Spawn blocking task for RPC call
         let rpc_client = Arc::clone(&self.rpc_client);
         let metadata = tokio::task::spawn_blocking(move || {
             // Get token account data
-            let account_data = rpc_client.get_account_data(&pubkey)
+            let account_data = rpc_client
+                .get_account_data(&pubkey)
                 .map_err(|e| AppError::RpcError(format!("Failed to get account data: {}", e)))?;
-            
+
             // SPL Token Mint layout: first byte is option (0 or 1), then decimals at offset 44
             if account_data.len() < 82 {
                 return Err(AppError::DecodingError(format!(
@@ -156,36 +157,36 @@ impl TokenMetadataProvider {
                     account_data.len()
                 )));
             }
-            
+
             // Decimals is at byte 44
             let decimals = account_data[44];
-            
+
             // Supply is a u64 at bytes 36-43 (little-endian)
             let supply_bytes: [u8; 8] = account_data[36..44]
                 .try_into()
                 .map_err(|_| AppError::DecodingError("Failed to read supply bytes".to_string()))?;
             let supply = u64::from_le_bytes(supply_bytes);
-            
+
             Ok::<CachedMetadata, AppError>(CachedMetadata::new(decimals, Some(supply)))
         })
         .await
         .map_err(|e| AppError::RpcError(format!("RPC task failed: {}", e)))??;
-        
+
         Ok(metadata)
     }
-    
+
     /// Clear the cache
     pub async fn clear_cache(&self) {
         let mut cache = self.cache.write().await;
         cache.clear();
     }
-    
+
     /// Get the number of cached entries
     pub async fn cache_size(&self) -> usize {
         let cache = self.cache.read().await;
         cache.len()
     }
-    
+
     /// Prefetch metadata for multiple mints
     pub async fn prefetch_metadata(&self, mints: &[String]) -> Result<(), AppError> {
         for mint in mints {
@@ -248,7 +249,7 @@ mod tests {
             Duration::from_secs(300),
         );
         assert_eq!(provider.cache_size().await, 0);
-        
+
         // Add entry to cache
         {
             let mut cache = provider.cache.write().await;
@@ -257,7 +258,7 @@ mod tests {
                 CachedMetadata::new(9, Some(1000000)),
             );
         }
-        
+
         assert_eq!(provider.cache_size().await, 1);
     }
 
@@ -267,7 +268,7 @@ mod tests {
             "https://api.mainnet-beta.solana.com".to_string(),
             Duration::from_secs(300),
         );
-        
+
         // Add entry to cache
         {
             let mut cache = provider.cache.write().await;
@@ -276,9 +277,9 @@ mod tests {
                 CachedMetadata::new(9, Some(1000000)),
             );
         }
-        
+
         assert_eq!(provider.cache_size().await, 1);
-        
+
         provider.clear_cache().await;
         assert_eq!(provider.cache_size().await, 0);
     }
@@ -290,7 +291,7 @@ mod tests {
             decimals: 9,
             supply: Some(1000000),
         };
-        
+
         let json = serde_json::to_string(&metadata).unwrap();
         assert!(json.contains("So11111111111111111111111111111111111111112"));
         assert!(json.contains("\"decimals\":9"));
