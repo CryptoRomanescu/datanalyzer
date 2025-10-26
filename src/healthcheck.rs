@@ -4,7 +4,6 @@
 /// - Health checks (liveness probe)
 /// - Readiness checks (readiness probe)
 /// - Prometheus metrics export
-
 use axum::{
     extract::State,
     http::StatusCode,
@@ -95,17 +94,17 @@ impl AppState {
             metrics_registry,
         }
     }
-    
+
     /// Update WebSocket connection status
     pub async fn set_websocket_connected(&self, connected: bool) {
         *self.websocket_connected.write().await = connected;
     }
-    
+
     /// Update active subscriptions count
     pub async fn set_active_subscriptions(&self, count: usize) {
         *self.active_subscriptions.write().await = count;
     }
-    
+
     /// Update problematic pools count
     pub async fn set_problematic_pools(&self, count: usize) {
         *self.problematic_pools.write().await = count;
@@ -118,17 +117,20 @@ async fn health_check(State(state): State<Arc<AppState>>) -> Response {
     let active_subscriptions = *state.active_subscriptions.read().await;
     let problematic_pools = *state.problematic_pools.read().await;
     let uptime = state.start_time.elapsed().as_secs();
-    
+
     let (status, message) = if websocket_connected {
         if problematic_pools > 0 {
-            (HealthStatus::Degraded, "WebSocket connected but some pools are problematic")
+            (
+                HealthStatus::Degraded,
+                "WebSocket connected but some pools are problematic",
+            )
         } else {
             (HealthStatus::Healthy, "All systems operational")
         }
     } else {
         (HealthStatus::Unhealthy, "WebSocket not connected")
     };
-    
+
     let response = HealthResponse {
         status: status.clone(),
         message: message.to_string(),
@@ -140,13 +142,13 @@ async fn health_check(State(state): State<Arc<AppState>>) -> Response {
             uptime_seconds: uptime,
         },
     };
-    
+
     let status_code = match status {
         HealthStatus::Healthy => StatusCode::OK,
         HealthStatus::Degraded => StatusCode::OK,
         HealthStatus::Unhealthy => StatusCode::SERVICE_UNAVAILABLE,
     };
-    
+
     (status_code, Json(response)).into_response()
 }
 
@@ -154,7 +156,7 @@ async fn health_check(State(state): State<Arc<AppState>>) -> Response {
 async fn readiness_check(State(state): State<Arc<AppState>>) -> Response {
     let websocket_connected = *state.websocket_connected.read().await;
     let active_subscriptions = *state.active_subscriptions.read().await;
-    
+
     let (status, message, status_code) = if websocket_connected && active_subscriptions > 0 {
         (
             ReadinessStatus::Ready,
@@ -174,23 +176,23 @@ async fn readiness_check(State(state): State<Arc<AppState>>) -> Response {
             StatusCode::SERVICE_UNAVAILABLE,
         )
     };
-    
+
     let response = ReadinessResponse {
         status,
         message: message.to_string(),
         timestamp: chrono::Utc::now().to_rfc3339(),
     };
-    
+
     (status_code, Json(response)).into_response()
 }
 
 /// Metrics endpoint handler
 async fn metrics_handler(State(state): State<Arc<AppState>>) -> Response {
     use prometheus::Encoder;
-    
+
     let encoder = prometheus::TextEncoder::new();
     let metric_families = state.metrics_registry.gather();
-    
+
     let mut buffer = Vec::new();
     if let Err(e) = encoder.encode(&metric_families, &mut buffer) {
         return (
@@ -199,7 +201,7 @@ async fn metrics_handler(State(state): State<Arc<AppState>>) -> Response {
         )
             .into_response();
     }
-    
+
     match String::from_utf8(buffer) {
         Ok(metrics_text) => (
             StatusCode::OK,
@@ -244,13 +246,13 @@ pub async fn start_server(
     state: Arc<AppState>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let app = create_router(state);
-    
+
     tracing::info!("Starting health check server on {}", addr);
-    
+
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await?;
-    
+
     Ok(())
 }
 
@@ -260,149 +262,194 @@ mod tests {
     use axum::body::Body;
     use axum::http::Request;
     use tower::ServiceExt;
-    
+
     fn create_test_state() -> Arc<AppState> {
         let registry = Arc::new(prometheus::Registry::new());
         Arc::new(AppState::new(registry))
     }
-    
+
     #[tokio::test]
     async fn test_health_check_healthy() {
         let state = create_test_state();
         state.set_websocket_connected(true).await;
         state.set_active_subscriptions(5).await;
         state.set_problematic_pools(0).await;
-        
+
         let app = create_router(state);
-        
+
         let response = app
-            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
-        
+
         assert_eq!(response.status(), StatusCode::OK);
     }
-    
+
     #[tokio::test]
     async fn test_health_check_unhealthy() {
         let state = create_test_state();
         state.set_websocket_connected(false).await;
-        
+
         let app = create_router(state);
-        
+
         let response = app
-            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
-        
+
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
-    
+
     #[tokio::test]
     async fn test_health_check_degraded() {
         let state = create_test_state();
         state.set_websocket_connected(true).await;
         state.set_problematic_pools(3).await;
-        
+
         let app = create_router(state);
-        
+
         let response = app
-            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
-        
+
         assert_eq!(response.status(), StatusCode::OK);
     }
-    
+
     #[tokio::test]
     async fn test_readiness_check_ready() {
         let state = create_test_state();
         state.set_websocket_connected(true).await;
         state.set_active_subscriptions(1).await;
-        
+
         let app = create_router(state);
-        
+
         let response = app
-            .oneshot(Request::builder().uri("/ready").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/ready")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
-        
+
         assert_eq!(response.status(), StatusCode::OK);
     }
-    
+
     #[tokio::test]
     async fn test_readiness_check_not_ready_no_connection() {
         let state = create_test_state();
         state.set_websocket_connected(false).await;
-        
+
         let app = create_router(state);
-        
+
         let response = app
-            .oneshot(Request::builder().uri("/ready").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/ready")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
-        
+
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
-    
+
     #[tokio::test]
     async fn test_readiness_check_not_ready_no_subscriptions() {
         let state = create_test_state();
         state.set_websocket_connected(true).await;
         state.set_active_subscriptions(0).await;
-        
+
         let app = create_router(state);
-        
+
         let response = app
-            .oneshot(Request::builder().uri("/ready").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/ready")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
-        
+
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
-    
+
     #[tokio::test]
     async fn test_healthz_endpoint() {
         let state = create_test_state();
         state.set_websocket_connected(true).await;
-        
+
         let app = create_router(state);
-        
+
         let response = app
-            .oneshot(Request::builder().uri("/healthz").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
-        
+
         assert_eq!(response.status(), StatusCode::OK);
     }
-    
+
     #[tokio::test]
     async fn test_readyz_endpoint() {
         let state = create_test_state();
         state.set_websocket_connected(true).await;
         state.set_active_subscriptions(1).await;
-        
+
         let app = create_router(state);
-        
+
         let response = app
-            .oneshot(Request::builder().uri("/readyz").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/readyz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
-        
+
         assert_eq!(response.status(), StatusCode::OK);
     }
-    
+
     #[tokio::test]
     async fn test_metrics_endpoint() {
         let state = create_test_state();
-        
+
         let app = create_router(state);
-        
+
         let response = app
-            .oneshot(Request::builder().uri("/metrics").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
-        
+
         assert_eq!(response.status(), StatusCode::OK);
     }
 }

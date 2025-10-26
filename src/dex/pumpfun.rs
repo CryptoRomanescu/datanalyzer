@@ -42,7 +42,6 @@
 /// The discriminator at offset 0x00 can be used for additional validation if needed.
 use crate::dex::DexDecoder;
 use crate::error::AppError;
-use crate::orchestrator;
 
 /// Decoder for Pump.fun bonding curve accounts.
 ///
@@ -161,26 +160,6 @@ impl DexDecoder for PumpFunDecoder {
         }
 
         Ok(())
-    }
-}
-
-impl PumpFunDecoder {
-    /// Decode reserve information from account data.
-    ///
-    /// This method returns ReserveInfo which contains direct reserves
-    /// since Pump.fun stores reserves directly in the account.
-    ///
-    /// # Arguments
-    ///
-    /// * `account_data` - Raw account data bytes from Solana
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(ReserveInfo)` - Reserve information (Direct variant)
-    /// * `Err(AppError)` - If data is invalid
-    pub fn decode_reserve_info(&self, account_data: &[u8]) -> Result<orchestrator::ReserveInfo, AppError> {
-        let (base, quote) = self.decode_reserves(account_data)?;
-        Ok(orchestrator::ReserveInfo::Direct { base, quote })
     }
 }
 

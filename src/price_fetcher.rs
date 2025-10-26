@@ -519,10 +519,12 @@ mod tests {
 
     #[test]
     fn test_metrics_success_rate() {
-        let mut metrics = PriceFetcherMetrics::default();
-        metrics.total_requests = 10;
-        metrics.successful_requests = 8;
-        metrics.failed_requests = 2;
+        let metrics = PriceFetcherMetrics {
+            total_requests: 10,
+            successful_requests: 8,
+            failed_requests: 2,
+            ..Default::default()
+        };
 
         assert_eq!(metrics.success_rate(), 80.0);
     }
@@ -535,9 +537,11 @@ mod tests {
 
     #[test]
     fn test_metrics_avg_response_time() {
-        let mut metrics = PriceFetcherMetrics::default();
-        metrics.successful_requests = 5;
-        metrics.total_response_time_ms = 1000;
+        let metrics = PriceFetcherMetrics {
+            successful_requests: 5,
+            total_response_time_ms: 1000,
+            ..Default::default()
+        };
 
         assert_eq!(metrics.avg_response_time_ms(), 200.0);
     }

@@ -109,7 +109,7 @@ impl ReconnectStrategy {
     /// Returns the current delay with added jitter (±20%) and then increases it for the next call
     pub fn next_delay(&mut self) -> Duration {
         let base_delay = self.current_delay;
-        
+
         // Add jitter: ±20% of the base delay
         let jitter_factor = {
             use rand::Rng;
@@ -117,10 +117,8 @@ impl ReconnectStrategy {
             // Generate a random factor between 0.8 and 1.2
             rng.gen_range(0.8..=1.2)
         };
-        
-        let delay_with_jitter = Duration::from_secs_f64(
-            base_delay.as_secs_f64() * jitter_factor
-        );
+
+        let delay_with_jitter = Duration::from_secs_f64(base_delay.as_secs_f64() * jitter_factor);
 
         // Calculate next delay with exponential backoff
         let next = Duration::from_secs_f64(self.current_delay.as_secs_f64() * self.multiplier);
@@ -193,7 +191,7 @@ impl WebSocketManager {
             metrics: None,
         }
     }
-    
+
     /// Create a new WebSocketManager instance with metrics
     ///
     /// # Arguments
@@ -233,7 +231,7 @@ impl WebSocketManager {
         let ws_url = self.ws_url.clone();
 
         tracing::info!("Attempting to connect to WebSocket at: {}", ws_url);
-        
+
         // Record connection attempt
         if let Some(ref metrics) = self.metrics {
             metrics.record_connection_attempt();
@@ -244,24 +242,24 @@ impl WebSocketManager {
             Ok(Ok(client)) => {
                 self.client = Some(Arc::new(client));
                 *self.is_connected.lock().await = true;
-                
+
                 // Record successful connection
                 if let Some(ref metrics) = self.metrics {
                     metrics.record_connection_success();
                 }
-                
+
                 let timestamp = chrono::Utc::now().to_rfc3339();
                 tracing::info!("Successfully connected to WebSocket at {}", timestamp);
                 Ok(())
             }
             Ok(Err(e)) => {
                 *self.is_connected.lock().await = false;
-                
+
                 // Record failed connection
                 if let Some(ref metrics) = self.metrics {
                     metrics.record_connection_failure();
                 }
-                
+
                 Err(AppError::RpcError(format!(
                     "Failed to create PubsubClient: {}. Please check if the URL is valid and the endpoint is accessible.",
                     e
@@ -269,12 +267,12 @@ impl WebSocketManager {
             }
             Err(_) => {
                 *self.is_connected.lock().await = false;
-                
+
                 // Record failed connection
                 if let Some(ref metrics) = self.metrics {
                     metrics.record_connection_failure();
                 }
-                
+
                 Err(AppError::RpcError(
                     "Connection timeout after 10 seconds. Please check your network connection and endpoint availability.".to_string()
                 ))
@@ -296,7 +294,7 @@ impl WebSocketManager {
         let client = self.client.as_ref().ok_or_else(|| {
             AppError::RpcError("Not connected. Call connect() first.".to_string())
         })?;
-        
+
         // Record subscription attempt
         if let Some(ref metrics) = self.metrics {
             metrics.record_subscription_attempt();
@@ -325,7 +323,7 @@ impl WebSocketManager {
                 if !monitored.contains(&pool_address) {
                     monitored.push(pool_address);
                 }
-                
+
                 // Update metrics
                 if let Some(ref metrics) = self.metrics {
                     metrics.set_active_subscriptions(subscriptions.len());
@@ -347,7 +345,7 @@ impl WebSocketManager {
                 if let Some(ref metrics) = self.metrics {
                     metrics.record_subscription_failure();
                 }
-                
+
                 // Track failure for this pool
                 let mut failure_counts = self.pool_failure_counts.lock().await;
                 let count = failure_counts.entry(pool_address).or_insert(0);
@@ -357,12 +355,12 @@ impl WebSocketManager {
                 if *count >= 3 {
                     let mut problematic = self.problematic_pools.lock().await;
                     problematic.insert(pool_address);
-                    
+
                     // Update metrics
                     if let Some(ref metrics) = self.metrics {
                         metrics.set_problematic_pools(problematic.len());
                     }
-                    
+
                     tracing::warn!(
                         "Pool {} marked as problematic after {} failures",
                         pool_address,
@@ -543,12 +541,12 @@ impl WebSocketManager {
     pub async fn mark_disconnected(&mut self, reason: &str) {
         self.client = None;
         *self.is_connected.lock().await = false;
-        
+
         // Record disconnection
         if let Some(ref metrics) = self.metrics {
             metrics.record_disconnection();
         }
-        
+
         let timestamp = chrono::Utc::now().to_rfc3339();
         tracing::warn!("Connection lost at {} - Reason: {}", timestamp, reason);
     }
@@ -585,7 +583,7 @@ impl WebSocketManager {
             }
 
             tracing::info!("Reconnection attempt #{}", attempt);
-            
+
             // Record reconnection attempt
             if let Some(ref metrics) = self.metrics {
                 metrics.record_reconnection_attempt();
@@ -594,7 +592,7 @@ impl WebSocketManager {
             match self.connect().await {
                 Ok(()) => {
                     tracing::info!("Reconnection successful on attempt #{}", attempt);
-                    
+
                     // Record successful reconnection
                     if let Some(ref metrics) = self.metrics {
                         metrics.record_reconnection_success();
@@ -613,7 +611,7 @@ impl WebSocketManager {
                 }
                 Err(e) => {
                     tracing::warn!("Reconnection attempt #{} failed: {}", attempt, e);
-                    
+
                     // Record failed reconnection
                     if let Some(ref metrics) = self.metrics {
                         metrics.record_reconnection_failure();
@@ -624,7 +622,7 @@ impl WebSocketManager {
                         let mut strategy = self.reconnect_strategy.lock().await;
                         strategy.next_delay()
                     };
-                    
+
                     // Record reconnection delay
                     if let Some(ref metrics) = self.metrics {
                         metrics.record_reconnection_delay(delay.as_secs_f64());
@@ -1110,12 +1108,12 @@ mod tests {
         let delay1 = strategy.next_delay();
         assert!(delay1 >= Duration::from_millis(400));
         assert!(delay1 <= Duration::from_millis(600));
-        
+
         // Second delay should be around 1500ms (with jitter: 1200-1800ms)
         let delay2 = strategy.next_delay();
         assert!(delay2 >= Duration::from_millis(1200));
         assert!(delay2 <= Duration::from_millis(1800));
-        
+
         // Third delay should be around 4500ms (with jitter: 3600-5400ms)
         let delay3 = strategy.next_delay();
         assert!(delay3 >= Duration::from_millis(3600));

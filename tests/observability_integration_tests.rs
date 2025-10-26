@@ -5,13 +5,10 @@
 /// - Healthcheck endpoints
 /// - Connection state tracking
 /// - Reconnection with metrics
-
 #[cfg(test)]
 mod observability_tests {
     use datanalyzer::{
-        healthcheck::AppState,
-        metrics::WebSocketMetrics,
-        websocket::WebSocketManager,
+        healthcheck::AppState, metrics::WebSocketMetrics, websocket::WebSocketManager,
     };
     use std::sync::Arc;
 
@@ -55,7 +52,7 @@ mod observability_tests {
         let state = AppState::new(registry);
 
         // Initial state
-        assert_eq!(*state.websocket_connected.read().await, false);
+        assert!(!(*state.websocket_connected.read().await));
         assert_eq!(*state.active_subscriptions.read().await, 0);
         assert_eq!(*state.problematic_pools.read().await, 0);
 
@@ -65,7 +62,7 @@ mod observability_tests {
         state.set_problematic_pools(2).await;
 
         // Verify updates
-        assert_eq!(*state.websocket_connected.read().await, true);
+        assert!(*state.websocket_connected.read().await);
         assert_eq!(*state.active_subscriptions.read().await, 5);
         assert_eq!(*state.problematic_pools.read().await, 2);
     }
@@ -156,7 +153,7 @@ mod observability_tests {
     #[test]
     fn test_metrics_default() {
         let metrics = WebSocketMetrics::default();
-        
+
         // Should be initialized with zeros
         assert_eq!(metrics.connections_total.get(), 0);
         assert_eq!(metrics.connection_state.get(), 0);
@@ -178,10 +175,10 @@ mod observability_tests {
         // Delays should be within expected ranges (with jitter)
         assert!(delay1 >= Duration::from_millis(800));
         assert!(delay1 <= Duration::from_millis(1200));
-        
+
         assert!(delay2 >= Duration::from_millis(1600));
         assert!(delay2 <= Duration::from_millis(2400));
-        
+
         assert!(delay3 >= Duration::from_millis(3200));
         assert!(delay3 <= Duration::from_millis(4800));
     }

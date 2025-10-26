@@ -6,14 +6,14 @@ use crate::config::PoolConfig;
 use crate::csv_writer::{CsvWriter, CsvWriterConfig};
 use crate::dex::{pumpfun::PumpFunDecoder, raydium::RaydiumDecoder, DexDecoder};
 use crate::error::AppError;
-use crate::liquidity::calculate_liquidity_usd;
 use crate::models::{DexType, PoolSnapshot};
-use crate::price_fetcher::PriceFetcher;
+use crate::oracle::Oracle;
+use crate::token_metadata::TokenMetadataProvider;
 
 use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_program::program_pack::Pack;
 use solana_sdk::pubkey::Pubkey;
 use spl_token::state::Account as SplTokenAccount;
-use solana_program::program_pack::Pack;
 
 use tokio::sync::{mpsc, Mutex};
 
@@ -34,16 +34,14 @@ struct SnapshotRecord {
 
 pub struct Orchestrator {
     rpc: Arc<RpcClient>,
-    price_fetcher: Arc<PriceFetcher>,
+    oracle: Arc<dyn Oracle>,
+    metadata_provider: Arc<TokenMetadataProvider>,
     out_dir: PathBuf,
     csv_config: CsvWriterConfig,
 
     // Metadane konfiguracji
     pool_types: HashMap<Pubkey, DexType>,
     pool_token_mints: HashMap<Pubkey, Pubkey>,
-
-    // Opcjonalne mapowanie mint -> CoinGecko ID
-    token_map: HashMap<Pubkey, String>,
 
     // Writery CSV per-pool
     writers: Arc<Mutex<HashMap<Pubkey, CsvWriter>>>,
@@ -52,29 +50,32 @@ pub struct Orchestrator {
 impl Orchestrator {
     pub fn new(
         rpc_http_url: String,
-        price_fetcher: Arc<PriceFetcher>,
+        oracle: Arc<dyn Oracle>,
+        metadata_provider: Arc<TokenMetadataProvider>,
         out_dir: impl AsRef<Path>,
         pools: &[PoolConfig],
-        token_map: HashMap<Pubkey, String>,
         csv_config: CsvWriterConfig,
     ) -> Self {
         let rpc = Arc::new(RpcClient::new(rpc_http_url));
 
         let mut pool_types = HashMap::new();
         let mut pool_token_mints = HashMap::new();
+
         for p in pools {
             pool_types.insert(*p.pool_address(), p.dex_type());
             pool_token_mints.insert(*p.pool_address(), *p.token_mint());
+            // For now, we'll determine quote mint from the pool data
+            // This will be populated during first decode
         }
 
         Self {
             rpc,
-            price_fetcher,
+            oracle,
+            metadata_provider,
             out_dir: out_dir.as_ref().to_path_buf(),
             csv_config,
             pool_types,
             pool_token_mints,
-            token_map,
             writers: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -83,7 +84,7 @@ impl Orchestrator {
     pub async fn run(
         self: Arc<Self>,
         mut rx: mpsc::Receiver<PoolUpdate>,
-        workers: usize,
+        _workers: usize,
     ) -> Result<(), AppError> {
         let (tx_snap, mut rx_snap) = mpsc::channel::<SnapshotRecord>(1024);
 
@@ -112,35 +113,67 @@ impl Orchestrator {
         update: PoolUpdate,
         tx_snap: &mpsc::Sender<SnapshotRecord>,
     ) -> Result<(), AppError> {
-        let dex = self
-            .pool_types
-            .get(&update.pool)
-            .ok_or_else(|| AppError::DecodingError(format!("Unknown pool type for {}", update.pool)))?;
+        let dex = self.pool_types.get(&update.pool).ok_or_else(|| {
+            AppError::DecodingError(format!("Unknown pool type for {}", update.pool))
+        })?;
 
         match dex {
             DexType::PumpFun => {
                 let decoder = PumpFunDecoder;
                 decoder.validate_account(&update.account_data)?;
-                let (reserve_base, reserve_quote) = decoder.decode_reserves(&update.account_data)?;
+                let (reserve_base, reserve_quote) =
+                    decoder.decode_reserves(&update.account_data)?;
 
+                // Get mint addresses from pool data (Pump.fun specific)
+                // For Pump.fun, we need to decode the bonding curve to get quote_mint
+                // For simplicity, assume quote is always SOL for Pump.fun
+                let base_mint = self
+                    .pool_token_mints
+                    .get(&update.pool)
+                    .cloned()
+                    .unwrap_or_default();
+                let quote_mint = "So11111111111111111111111111111111111111112"; // SOL
+
+                // Fetch decimals
+                let base_decimals = self
+                    .metadata_provider
+                    .get_decimals(&base_mint.to_string())
+                    .await
+                    .unwrap_or(9);
+                let quote_decimals = 9u8; // SOL always has 9 decimals
+
+                // Compute price: price_base_in_quote = (quote_amount / 10^dec_quote) / (base_amount / 10^dec_base)
                 let price = if reserve_base > 0 {
-                    reserve_quote as f64 / reserve_base as f64
+                    let quote_normalized =
+                        reserve_quote as f64 / 10_f64.powi(quote_decimals as i32);
+                    let base_normalized = reserve_base as f64 / 10_f64.powi(base_decimals as i32);
+                    quote_normalized / base_normalized
                 } else {
                     0.0
                 };
 
-                let snapshot = PoolSnapshot::new(
+                // Compute liquidity_usd using Oracle
+                let liquidity_usd = self
+                    .compute_liquidity_usd(
+                        reserve_base,
+                        reserve_quote,
+                        base_decimals,
+                        quote_decimals,
+                        &base_mint.to_string(),
+                        quote_mint,
+                    )
+                    .await
+                    .unwrap_or(0.0);
+
+                let snapshot = PoolSnapshot::with_liquidity(
                     update.pool.to_string(),
-                    self.pool_token_mints
-                        .get(&update.pool)
-                        .cloned()
-                        .unwrap_or_default()
-                        .to_string(),
+                    base_mint.to_string(),
                     *dex,
                     reserve_base,
                     reserve_quote,
                     chrono::Utc::now().timestamp(),
                     price,
+                    liquidity_usd,
                 )?;
 
                 tx_snap
@@ -153,47 +186,79 @@ impl Orchestrator {
             }
 
             DexType::Raydium => {
-                // 1) Wyciągnij vaulty z AmmInfo
+                // 1) Extract vault info from AmmInfo
                 let decoder = RaydiumDecoder;
                 decoder.validate_account(&update.account_data)?;
                 let vault_info = decoder.get_vault_info(&update.account_data)?;
 
-                // 2) Pobierz konta SPL vaultów przez HTTP RPC
+                // 2) Fetch vault SPL Token Account data via RPC
                 let coin_data = self
                     .rpc
                     .get_account_data(&vault_info.coin_vault)
                     .await
-                    .map_err(|e| AppError::RpcError(format!("get_account_data coin_vault: {}", e)))?;
+                    .map_err(|e| {
+                        AppError::RpcError(format!("get_account_data coin_vault: {}", e))
+                    })?;
                 let pc_data = self
                     .rpc
                     .get_account_data(&vault_info.pc_vault)
                     .await
                     .map_err(|e| AppError::RpcError(format!("get_account_data pc_vault: {}", e)))?;
 
-                // 3) Parsuj SPL Token Account i wydobądź amount
+                // 3) Parse SPL Token Account and extract amounts
                 let coin_acc = SplTokenAccount::unpack(&coin_data)
                     .map_err(|e| AppError::DecodingError(format!("SPL unpack coin: {}", e)))?;
                 let pc_acc = SplTokenAccount::unpack(&pc_data)
                     .map_err(|e| AppError::DecodingError(format!("SPL unpack pc: {}", e)))?;
 
                 let reserve_base = coin_acc.amount; // Raydium: coin_vault = base
-                let reserve_quote = pc_acc.amount; // pc_vault = quote (często SOL lub USDC)
+                let reserve_quote = pc_acc.amount; // pc_vault = quote (usually SOL or USDC)
 
+                // Get mint addresses for decimal lookup
+                let base_mint = vault_info.coin_mint.to_string();
+                let quote_mint = vault_info.pc_mint.to_string();
+
+                // Fetch decimals from on-chain with caching
+                let base_decimals = self
+                    .metadata_provider
+                    .get_decimals(&base_mint)
+                    .await
+                    .unwrap_or(9);
+                let quote_decimals = self
+                    .metadata_provider
+                    .get_decimals(&quote_mint)
+                    .await
+                    .unwrap_or(9);
+
+                // Compute price: price_base_in_quote = (quote_amount / 10^dec_quote) / (base_amount / 10^dec_base)
                 let price = if reserve_base > 0 {
-                    reserve_quote as f64 / reserve_base as f64
+                    let quote_normalized =
+                        reserve_quote as f64 / 10_f64.powi(quote_decimals as i32);
+                    let base_normalized = reserve_base as f64 / 10_f64.powi(base_decimals as i32);
+                    quote_normalized / base_normalized
                 } else {
                     0.0
                 };
 
-                // Opcjonalnie: liquidity USD (wymaga mapowania tokenów)
-                // Używamy "solana" dla SOL quote, a base wg token_map (jeśli istnieje)
+                // Compute liquidity_usd using Oracle
+                let liquidity_usd = self
+                    .compute_liquidity_usd(
+                        reserve_base,
+                        reserve_quote,
+                        base_decimals,
+                        quote_decimals,
+                        &base_mint,
+                        &quote_mint,
+                    )
+                    .await
+                    .unwrap_or(0.0);
+
                 let token_mint = self
                     .pool_token_mints
                     .get(&update.pool)
                     .cloned()
                     .unwrap_or_default();
-
-                let mut snapshot = PoolSnapshot::new(
+                let snapshot = PoolSnapshot::with_liquidity(
                     update.pool.to_string(),
                     token_mint.to_string(),
                     *dex,
@@ -201,43 +266,8 @@ impl Orchestrator {
                     reserve_quote,
                     chrono::Utc::now().timestamp(),
                     price,
+                    liquidity_usd,
                 )?;
-
-                // Jeśli masz mapowanie mint->coingecko id, możesz policzyć liquidity
-                if let Some(token_id) = self.token_map.get(&token_mint) {
-                    // Zakładamy PC=SOL i bierzemy "solana" jako quote
-                    let prices = self
-                        .price_fetcher
-                        .fetch_prices(&vec!["solana".to_string(), token_id.clone()])
-                        .await
-                        .unwrap_or_default();
-
-                    let sol_price = prices.get("solana").copied().unwrap_or(0.0);
-                    let token_price = prices.get(token_id).copied().unwrap_or(0.0);
-
-                    if sol_price > 0.0 || token_price > 0.0 {
-                        // Decimals: SOL=9, token przyjmij 9 jako domyślne (lub dołóż provider decimali)
-                        let token_decimals = 9u8;
-                        if let Ok(liq) = calculate_liquidity_usd(
-                            reserve_quote,
-                            reserve_base,
-                            sol_price,
-                            token_price,
-                            token_decimals,
-                        ) {
-                            snapshot = PoolSnapshot::with_liquidity(
-                                snapshot.pool_address.clone(),
-                                snapshot.token_mint.clone(),
-                                snapshot.dex_type,
-                                snapshot.reserve_base,
-                                snapshot.reserve_quote,
-                                snapshot.timestamp,
-                                snapshot.price,
-                                liq,
-                            )?;
-                        }
-                    }
-                }
 
                 tx_snap
                     .send(SnapshotRecord {
@@ -252,17 +282,60 @@ impl Orchestrator {
         Ok(())
     }
 
+    /// Compute liquidity in USD using the Oracle
+    ///
+    /// This method:
+    /// 1. Checks if quote mint is a stable coin (returns 1.0)
+    /// 2. Otherwise queries Oracle for quote→USD price
+    /// 3. Computes liquidity as: base_value_usd + quote_value_usd
+    async fn compute_liquidity_usd(
+        &self,
+        reserve_base: u64,
+        reserve_quote: u64,
+        base_decimals: u8,
+        quote_decimals: u8,
+        _base_mint: &str,
+        quote_mint: &str,
+    ) -> Result<f64, AppError> {
+        // Get quote price in USD via Oracle
+        let quote_price_usd = self.oracle.fetch_price_usd(quote_mint).await?;
+
+        // Normalize reserves to actual token amounts
+        let quote_amount = reserve_quote as f64 / 10_f64.powi(quote_decimals as i32);
+        let _base_amount = reserve_base as f64 / 10_f64.powi(base_decimals as i32);
+
+        // Compute quote value in USD
+        let quote_value_usd = quote_amount * quote_price_usd;
+
+        // Compute base value using the price already calculated
+        // price = quote_amount / base_amount
+        // base_in_quote_terms = base_amount * price = quote_amount
+        // So total liquidity = 2 * quote_value_usd
+        let base_value_usd = quote_value_usd; // Because in AMM pools, value is balanced
+
+        let total_liquidity = base_value_usd + quote_value_usd;
+
+        Ok(total_liquidity)
+    }
+
     async fn write_snapshot(&self, rec: SnapshotRecord) -> Result<(), AppError> {
-        let pool_pk = rec.snapshot.pool_address.parse::<Pubkey>()
+        let pool_pk = rec
+            .snapshot
+            .pool_address
+            .parse::<Pubkey>()
             .map_err(|e| AppError::DecodingError(format!("Invalid pool pubkey: {}", e)))?;
 
         let mut writers = self.writers.lock().await;
-        
+
         // Get or create writer for this pool
-        if !writers.contains_key(&pool_pk) {
-            let filename = format!("{}_{}.csv", rec.dex_type.to_string().to_lowercase(), &pool_pk.to_string()[..8]);
+        if let std::collections::hash_map::Entry::Vacant(e) = writers.entry(pool_pk) {
+            let filename = format!(
+                "{}_{}.csv",
+                rec.dex_type.to_string().to_lowercase(),
+                &pool_pk.to_string()[..8]
+            );
             let path = self.out_dir.join(filename);
-            
+
             // Headers that match PoolSnapshot::to_csv_row()
             let headers = &[
                 "pool_address",
@@ -274,18 +347,19 @@ impl Orchestrator {
                 "price",
                 "liquidity_usd",
             ];
-            
+
             let writer = CsvWriter::with_config(&path, headers, self.csv_config.clone())?;
-            writers.insert(pool_pk, writer);
+            e.insert(writer);
         }
-        
+
         // Write the record
-        let writer = writers.get_mut(&pool_pk)
+        let writer = writers
+            .get_mut(&pool_pk)
             .ok_or_else(|| AppError::CsvError("Writer not found after creation".to_string()))?;
-        
+
         let csv_row = rec.snapshot.to_csv_row();
         writer.write_record(&csv_row)?;
-        
+
         Ok(())
     }
 }

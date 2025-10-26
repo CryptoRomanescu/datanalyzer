@@ -35,8 +35,8 @@ pub struct JupiterPriceData {
 /// Circuit breaker state for handling rate limits
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CircuitBreakerState {
-    Closed,  // Normal operation
-    Open,    // Too many failures, stop trying
+    Closed,   // Normal operation
+    Open,     // Too many failures, stop trying
     HalfOpen, // Testing if service recovered
 }
 
@@ -61,7 +61,7 @@ impl CircuitBreaker {
             timeout,
         }
     }
-    
+
     /// Check if the circuit breaker allows requests
     pub fn can_request(&mut self) -> bool {
         match self.state {
@@ -84,7 +84,7 @@ impl CircuitBreaker {
             CircuitBreakerState::HalfOpen => true,
         }
     }
-    
+
     /// Record a successful request
     pub fn record_success(&mut self) {
         if self.state == CircuitBreakerState::HalfOpen {
@@ -94,25 +94,26 @@ impl CircuitBreaker {
         self.failure_count = 0;
         self.last_failure_time = None;
     }
-    
+
     /// Record a failed request
     pub fn record_failure(&mut self) {
         self.failure_count += 1;
         self.last_failure_time = Some(Instant::now());
-        
-        if self.failure_count >= self.threshold {
-            if self.state != CircuitBreakerState::Open {
-                log::warn!("Circuit breaker opening after {} failures", self.failure_count);
-                self.state = CircuitBreakerState::Open;
-            }
+
+        if self.failure_count >= self.threshold && self.state != CircuitBreakerState::Open {
+            log::warn!(
+                "Circuit breaker opening after {} failures",
+                self.failure_count
+            );
+            self.state = CircuitBreakerState::Open;
         }
     }
-    
+
     /// Get the current state
     pub fn state(&self) -> CircuitBreakerState {
         self.state.clone()
     }
-    
+
     /// Reset the circuit breaker
     pub fn reset(&mut self) {
         self.state = CircuitBreakerState::Closed;
@@ -126,10 +127,10 @@ impl CircuitBreaker {
 pub trait PriceProvider: Send + Sync {
     /// Fetch price for a single token mint address
     async fn fetch_price(&self, mint: &str) -> Result<f64, AppError>;
-    
+
     /// Get the name of the provider
     fn name(&self) -> &str;
-    
+
     /// Check if the provider is currently available
     async fn is_available(&self) -> bool {
         true // Default implementation
@@ -152,10 +153,11 @@ impl JupiterPriceProvider {
             .timeout(Duration::from_secs(30))
             .build()
             .expect("Failed to build HTTP client");
-        
+
         // Circuit breaker: open after 3 failures within 60 seconds
-        let circuit_breaker = Arc::new(RwLock::new(CircuitBreaker::new(3, Duration::from_secs(60))));
-        
+        let circuit_breaker =
+            Arc::new(RwLock::new(CircuitBreaker::new(3, Duration::from_secs(60))));
+
         Self {
             client,
             api_url: "https://api.jup.ag/price/v2".to_string(),
@@ -164,16 +166,17 @@ impl JupiterPriceProvider {
             circuit_breaker,
         }
     }
-    
+
     /// Create a Jupiter price provider with custom API URL
     pub fn with_config(api_url: String, cache_ttl: Duration) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
             .expect("Failed to build HTTP client");
-        
-        let circuit_breaker = Arc::new(RwLock::new(CircuitBreaker::new(3, Duration::from_secs(60))));
-        
+
+        let circuit_breaker =
+            Arc::new(RwLock::new(CircuitBreaker::new(3, Duration::from_secs(60))));
+
         Self {
             client,
             api_url,
@@ -182,44 +185,45 @@ impl JupiterPriceProvider {
             circuit_breaker,
         }
     }
-    
+
     /// Fetch price directly from Jupiter API
     async fn fetch_from_api(&self, mint: &str) -> Result<f64, AppError> {
         let url = format!("{}?ids={}", self.api_url, mint);
-        
+
         let response = self
             .client
             .get(&url)
             .send()
             .await
             .map_err(|e| AppError::PriceError(format!("Jupiter API request failed: {}", e)))?;
-        
+
         // Check for rate limiting (429)
         if response.status().as_u16() == 429 {
             log::warn!("Jupiter API rate limit hit (429)");
-            return Err(AppError::PriceError("Rate limit exceeded (429)".to_string()));
+            return Err(AppError::PriceError(
+                "Rate limit exceeded (429)".to_string(),
+            ));
         }
-        
+
         if !response.status().is_success() {
             return Err(AppError::PriceError(format!(
                 "Jupiter API returned error status: {}",
                 response.status()
             )));
         }
-        
+
         let body = response
             .text()
             .await
             .map_err(|e| AppError::PriceError(format!("Failed to read response body: {}", e)))?;
-        
-        let parsed: JupiterPriceResponse = serde_json::from_str(&body)
-            .map_err(|e| AppError::PriceError(format!("Failed to parse Jupiter response: {}", e)))?;
-        
-        parsed
-            .data
-            .get(mint)
-            .map(|data| data.price)
-            .ok_or_else(|| AppError::PriceError(format!("Token {} not found in Jupiter response", mint)))
+
+        let parsed: JupiterPriceResponse = serde_json::from_str(&body).map_err(|e| {
+            AppError::PriceError(format!("Failed to parse Jupiter response: {}", e))
+        })?;
+
+        parsed.data.get(mint).map(|data| data.price).ok_or_else(|| {
+            AppError::PriceError(format!("Token {} not found in Jupiter response", mint))
+        })
     }
 }
 
@@ -236,7 +240,7 @@ impl PriceProvider for JupiterPriceProvider {
                 }
             }
         }
-        
+
         // Check circuit breaker
         {
             let mut cb = self.circuit_breaker.write().await;
@@ -245,7 +249,7 @@ impl PriceProvider for JupiterPriceProvider {
                 return Err(AppError::PriceError("Circuit breaker is open".to_string()));
             }
         }
-        
+
         // Fetch from API
         match self.fetch_from_api(mint).await {
             Ok(price) => {
@@ -254,13 +258,13 @@ impl PriceProvider for JupiterPriceProvider {
                     let mut cache = self.cache.write().await;
                     cache.insert(mint.to_string(), CachedPrice::new(price));
                 }
-                
+
                 // Record success in circuit breaker
                 {
                     let mut cb = self.circuit_breaker.write().await;
                     cb.record_success();
                 }
-                
+
                 Ok(price)
             }
             Err(e) => {
@@ -269,16 +273,16 @@ impl PriceProvider for JupiterPriceProvider {
                     let mut cb = self.circuit_breaker.write().await;
                     cb.record_failure();
                 }
-                
+
                 Err(e)
             }
         }
     }
-    
+
     fn name(&self) -> &str {
         "Jupiter"
     }
-    
+
     async fn is_available(&self) -> bool {
         let cb = self.circuit_breaker.read().await;
         cb.state() != CircuitBreakerState::Open
@@ -295,8 +299,9 @@ pub struct CoinGeckoPriceProvider {
 impl CoinGeckoPriceProvider {
     /// Create a new CoinGecko price provider
     pub fn new(fetcher: Arc<PriceFetcher>, token_mapping: Arc<TokenMappingService>) -> Self {
-        let circuit_breaker = Arc::new(RwLock::new(CircuitBreaker::new(3, Duration::from_secs(60))));
-        
+        let circuit_breaker =
+            Arc::new(RwLock::new(CircuitBreaker::new(3, Duration::from_secs(60))));
+
         Self {
             fetcher,
             token_mapping,
@@ -316,11 +321,14 @@ impl PriceProvider for CoinGeckoPriceProvider {
                 return Err(AppError::PriceError("Circuit breaker is open".to_string()));
             }
         }
-        
+
         // Map mint to CoinGecko token ID
-        let token_id = self.token_mapping.get_token_id(mint).await?
+        let token_id = self
+            .token_mapping
+            .get_token_id(mint)
+            .await?
             .ok_or_else(|| AppError::PriceError(format!("No token mapping for mint: {}", mint)))?;
-        
+
         // Fetch price using CoinGecko API
         match self.fetcher.fetch_price(&token_id).await {
             Ok(price) => {
@@ -341,11 +349,11 @@ impl PriceProvider for CoinGeckoPriceProvider {
             }
         }
     }
-    
+
     fn name(&self) -> &str {
         "CoinGecko"
     }
-    
+
     async fn is_available(&self) -> bool {
         let cb = self.circuit_breaker.read().await;
         cb.state() != CircuitBreakerState::Open
@@ -366,37 +374,50 @@ impl FallbackPriceProvider {
             stale_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    
+
     /// Fetch price using fallback chain
     pub async fn fetch_price(&self, mint: &str) -> Result<f64, AppError> {
         // Try each provider in order
         for provider in &self.providers {
             log::debug!("Trying provider: {}", provider.name());
-            
+
             match provider.fetch_price(mint).await {
                 Ok(price) => {
-                    log::debug!("Successfully fetched price from {}: {}", provider.name(), price);
-                    
+                    log::debug!(
+                        "Successfully fetched price from {}: {}",
+                        provider.name(),
+                        price
+                    );
+
                     // Update stale cache
                     {
                         let mut cache = self.stale_cache.write().await;
                         cache.insert(mint.to_string(), CachedPrice::new(price));
                     }
-                    
+
                     return Ok(price);
                 }
                 Err(e) => {
-                    log::warn!("Provider {} failed for mint {}: {}", provider.name(), mint, e);
+                    log::warn!(
+                        "Provider {} failed for mint {}: {}",
+                        provider.name(),
+                        mint,
+                        e
+                    );
                     continue; // Try next provider
                 }
             }
         }
-        
+
         // All providers failed, try stale cache
         log::warn!("All providers failed for mint {}, trying stale cache", mint);
         let cache = self.stale_cache.read().await;
         if let Some(cached) = cache.get(mint) {
-            log::warn!("Using stale cached price for {} (age: {:?})", mint, cached.age());
+            log::warn!(
+                "Using stale cached price for {} (age: {:?})",
+                mint,
+                cached.age()
+            );
             Ok(cached.price())
         } else {
             Err(AppError::PriceError(format!(
@@ -405,7 +426,7 @@ impl FallbackPriceProvider {
             )))
         }
     }
-    
+
     /// Get the number of active providers
     pub fn provider_count(&self) -> usize {
         self.providers.len()
@@ -434,7 +455,7 @@ mod tests {
         let mut cb = CircuitBreaker::new(3, Duration::from_secs(60));
         cb.record_failure();
         assert_eq!(cb.failure_count, 1);
-        
+
         cb.record_success();
         assert_eq!(cb.failure_count, 0);
         assert_eq!(cb.state(), CircuitBreakerState::Closed);
@@ -443,13 +464,13 @@ mod tests {
     #[test]
     fn test_circuit_breaker_opens_after_threshold() {
         let mut cb = CircuitBreaker::new(3, Duration::from_secs(60));
-        
+
         cb.record_failure();
         assert_eq!(cb.state(), CircuitBreakerState::Closed);
-        
+
         cb.record_failure();
         assert_eq!(cb.state(), CircuitBreakerState::Closed);
-        
+
         cb.record_failure();
         assert_eq!(cb.state(), CircuitBreakerState::Open);
     }
@@ -457,28 +478,28 @@ mod tests {
     #[test]
     fn test_circuit_breaker_cannot_request_when_open() {
         let mut cb = CircuitBreaker::new(3, Duration::from_secs(60));
-        
+
         // Open the circuit breaker
         cb.record_failure();
         cb.record_failure();
         cb.record_failure();
-        
+
         assert!(!cb.can_request());
     }
 
     #[tokio::test]
     async fn test_circuit_breaker_transitions_to_half_open() {
         let mut cb = CircuitBreaker::new(3, Duration::from_millis(100));
-        
+
         // Open the circuit breaker
         cb.record_failure();
         cb.record_failure();
         cb.record_failure();
         assert_eq!(cb.state(), CircuitBreakerState::Open);
-        
+
         // Wait for timeout
         tokio::time::sleep(Duration::from_millis(150)).await;
-        
+
         // Should transition to half-open
         assert!(cb.can_request());
         assert_eq!(cb.state(), CircuitBreakerState::HalfOpen);
@@ -488,7 +509,7 @@ mod tests {
     fn test_circuit_breaker_half_open_closes_on_success() {
         let mut cb = CircuitBreaker::new(3, Duration::from_secs(60));
         cb.state = CircuitBreakerState::HalfOpen;
-        
+
         cb.record_success();
         assert_eq!(cb.state(), CircuitBreakerState::Closed);
     }
@@ -500,7 +521,7 @@ mod tests {
         cb.record_failure();
         cb.record_failure();
         assert_eq!(cb.state(), CircuitBreakerState::Open);
-        
+
         cb.reset();
         assert_eq!(cb.state(), CircuitBreakerState::Closed);
         assert_eq!(cb.failure_count, 0);
@@ -536,7 +557,8 @@ mod tests {
 
     #[test]
     fn test_fallback_price_provider_count() {
-        let provider1 = Arc::new(JupiterPriceProvider::new(Duration::from_secs(300))) as Arc<dyn PriceProvider>;
+        let provider1 =
+            Arc::new(JupiterPriceProvider::new(Duration::from_secs(300))) as Arc<dyn PriceProvider>;
         let providers = vec![provider1];
         let fallback = FallbackPriceProvider::new(providers);
         assert_eq!(fallback.provider_count(), 1);

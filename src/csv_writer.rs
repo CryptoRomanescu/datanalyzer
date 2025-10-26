@@ -2,7 +2,6 @@
 ///
 /// Provides a buffered CSV writer with headers, proper flushing, append mode,
 /// directory creation, file rotation, and batching capabilities.
-
 use crate::error::AppError;
 use csv::Writer;
 use std::fs::{self, File, OpenOptions};
@@ -30,7 +29,7 @@ impl Default for CsvWriterConfig {
         Self {
             append: false,
             max_file_size: 10 * 1024 * 1024, // 10MB
-            max_file_age: 3600,                // 1 hour
+            max_file_age: 3600,              // 1 hour
             batch_size: 100,
             batch_time_ms: 5000, // 5 seconds
         }
@@ -165,9 +164,9 @@ impl CsvWriter {
 
         // Write headers only if needed
         if should_write_headers {
-            writer.write_record(headers).map_err(|e| {
-                AppError::IoError(format!("Failed to write CSV headers: {}", e))
-            })?;
+            writer
+                .write_record(headers)
+                .map_err(|e| AppError::IoError(format!("Failed to write CSV headers: {}", e)))?;
         }
 
         let now = SystemTime::now();
@@ -221,9 +220,8 @@ impl CsvWriter {
     fn should_rotate(&self) -> Result<bool, AppError> {
         // Check file size rotation
         if self.config.max_file_size > 0 {
-            let metadata = fs::metadata(&self.path).map_err(|e| {
-                AppError::IoError(format!("Failed to get file metadata: {}", e))
-            })?;
+            let metadata = fs::metadata(&self.path)
+                .map_err(|e| AppError::IoError(format!("Failed to get file metadata: {}", e)))?;
 
             if metadata.len() >= self.config.max_file_size {
                 return Ok(true);
@@ -317,7 +315,11 @@ impl CsvWriter {
             .to_str()
             .ok_or_else(|| AppError::IoError("Invalid UTF-8 in file stem".to_string()))?;
 
-        let extension = self.path.extension().and_then(|e| e.to_str()).unwrap_or("csv");
+        let extension = self
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("csv");
 
         let rotated_name = format!("{}_{}.{}", stem, timestamp, extension);
         let mut rotated_path = self.path.clone();
@@ -404,10 +406,10 @@ mod tests {
                 .expect("Failed to create CSV writer");
 
             writer
-                .write_record(&["Alice", "30", "NYC"])
+                .write_record(["Alice", "30", "NYC"])
                 .expect("Failed to write record");
             writer
-                .write_record(&["Bob", "25", "LA"])
+                .write_record(["Bob", "25", "LA"])
                 .expect("Failed to write record");
 
             writer.flush().expect("Failed to flush");
@@ -438,7 +440,7 @@ mod tests {
                 CsvWriter::new(test_file, &["x", "y"]).expect("Failed to create CSV writer");
 
             writer
-                .write_record(&["1", "2"])
+                .write_record(["1", "2"])
                 .expect("Failed to write record");
 
             // Don't explicitly flush - let Drop handle it
@@ -465,10 +467,10 @@ mod tests {
 
         // Create initial file
         {
-            let mut writer = CsvWriter::new(test_file, &["col1", "col2"])
-                .expect("Failed to create CSV writer");
+            let mut writer =
+                CsvWriter::new(test_file, &["col1", "col2"]).expect("Failed to create CSV writer");
             writer
-                .write_record(&["val1", "val2"])
+                .write_record(["val1", "val2"])
                 .expect("Failed to write record");
             writer.flush().expect("Failed to flush");
         }
@@ -479,7 +481,7 @@ mod tests {
             let mut writer = CsvWriter::with_config(test_file, &["col1", "col2"], config)
                 .expect("Failed to create CSV writer in append mode");
             writer
-                .write_record(&["val3", "val4"])
+                .write_record(["val3", "val4"])
                 .expect("Failed to write record");
             writer.flush().expect("Failed to flush");
         }
@@ -592,7 +594,7 @@ mod tests {
                 .expect("Failed to create CSV writer");
 
             writer
-                .write_record(&["initial"])
+                .write_record(["initial"])
                 .expect("Failed to write record");
             writer.flush().expect("Failed to flush");
 
@@ -601,7 +603,7 @@ mod tests {
 
             // This should trigger rotation
             writer
-                .write_record(&["after_rotation"])
+                .write_record(["after_rotation"])
                 .expect("Failed to write record");
             writer.flush().expect("Failed to flush");
         }
@@ -641,7 +643,7 @@ mod tests {
         let config = CsvWriterConfig::builder()
             .batch_size(3)
             .max_file_size(0) // Disable rotation
-            .max_file_age(0)  // Disable rotation
+            .max_file_age(0) // Disable rotation
             .build();
 
         {
@@ -649,12 +651,12 @@ mod tests {
                 .expect("Failed to create CSV writer");
 
             // Write 2 records - should not flush yet
-            writer.write_record(&["1"]).expect("Failed to write");
-            writer.write_record(&["2"]).expect("Failed to write");
+            writer.write_record(["1"]).expect("Failed to write");
+            writer.write_record(["2"]).expect("Failed to write");
             assert_eq!(writer.records_written(), 2);
 
             // Write 3rd record - should trigger flush
-            writer.write_record(&["3"]).expect("Failed to write");
+            writer.write_record(["3"]).expect("Failed to write");
             assert_eq!(writer.records_written(), 0); // Reset after flush
         }
 
@@ -672,7 +674,7 @@ mod tests {
             .batch_time_ms(1000)
             .build();
 
-        assert_eq!(config.append, true);
+        assert!(config.append);
         assert_eq!(config.max_file_size, 1024);
         assert_eq!(config.max_file_age, 3600);
         assert_eq!(config.batch_size, 50);
@@ -683,7 +685,7 @@ mod tests {
     fn test_csv_writer_config_default() {
         let config = CsvWriterConfig::default();
 
-        assert_eq!(config.append, false);
+        assert!(!config.append);
         assert_eq!(config.max_file_size, 10 * 1024 * 1024);
         assert_eq!(config.max_file_age, 3600);
         assert_eq!(config.batch_size, 100);
@@ -771,7 +773,13 @@ mod tests {
         {
             let mut writer = CsvWriter::with_config(
                 test_file,
-                &["timestamp", "pool", "reserve_base", "reserve_quote", "price"],
+                &[
+                    "timestamp",
+                    "pool",
+                    "reserve_base",
+                    "reserve_quote",
+                    "price",
+                ],
                 config,
             )
             .expect("Failed to create CSV writer");
@@ -806,10 +814,7 @@ mod tests {
             elapsed
         );
 
-        println!(
-            "Performance test: 10,000 records written in {:?}",
-            elapsed
-        );
+        println!("Performance test: 10,000 records written in {:?}", elapsed);
 
         // Clean up
         let _ = fs::remove_file(test_file);

@@ -69,6 +69,18 @@ min_delay_ms = 100
 # Cache TTL in seconds (default: 300 = 5 minutes)
 cache_ttl_secs = 300
 
+# Oracle configuration for liquidity_usd computation
+[oracle]
+# List of stable coin mints valued at $1.0
+stable_mints = [
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",  # USDC
+    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",  # USDT
+]
+# Jupiter API URL for price fetching
+jupiter_url = "https://price.jup.ag/v4"
+# Cache TTL for oracle prices in seconds (default: 60)
+cache_ttl_secs = 60
+
 # Token mapping: Solana mint address to CoinGecko token ID
 [[token_mapping]]
 mint = "So11111111111111111111111111111111111111112"
