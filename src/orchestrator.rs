@@ -40,8 +40,8 @@ pub struct Orchestrator {
     csv_config: CsvWriterConfig,
 
     // Metadane konfiguracji
-    pool_types: HashMap<Pubkey, DexType>,
-    pool_token_mints: HashMap<Pubkey, Pubkey>,
+    pool_types: Arc<Mutex<HashMap<Pubkey, DexType>>>,
+    pool_token_mints: Arc<Mutex<HashMap<Pubkey, Pubkey>>>,
 
     // Writery CSV per-pool
     writers: Arc<Mutex<HashMap<Pubkey, CsvWriter>>>,
@@ -64,8 +64,6 @@ impl Orchestrator {
         for p in pools {
             pool_types.insert(*p.pool_address(), p.dex_type());
             pool_token_mints.insert(*p.pool_address(), *p.token_mint());
-            // For now, we'll determine quote mint from the pool data
-            // This will be populated during first decode
         }
 
         Self {
@@ -74,10 +72,37 @@ impl Orchestrator {
             metadata_provider,
             out_dir: out_dir.as_ref().to_path_buf(),
             csv_config,
-            pool_types,
-            pool_token_mints,
+            pool_types: Arc::new(Mutex::new(pool_types)),
+            pool_token_mints: Arc::new(Mutex::new(pool_token_mints)),
             writers: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Register a new pool dynamically (for discovery)
+    pub async fn register_pool(&self, pool_config: PoolConfig) -> Result<(), AppError> {
+        let pool_address = *pool_config.pool_address();
+        let dex_type = pool_config.dex_type();
+        let token_mint = *pool_config.token_mint();
+
+        let mut pool_types = self.pool_types.lock().await;
+        let mut pool_token_mints = self.pool_token_mints.lock().await;
+
+        pool_types.insert(pool_address, dex_type);
+        pool_token_mints.insert(pool_address, token_mint);
+
+        log::info!(
+            "Registered new pool: {} (type: {}, mint: {})",
+            pool_address,
+            dex_type,
+            token_mint
+        );
+
+        Ok(())
+    }
+
+    /// Get the number of registered pools
+    pub async fn pool_count(&self) -> usize {
+        self.pool_types.lock().await.len()
     }
 
     /// Uruchamia pętlę przetwarzania z pulą workerów i osobnym workerem zapisu CSV.
@@ -113,9 +138,12 @@ impl Orchestrator {
         update: PoolUpdate,
         tx_snap: &mpsc::Sender<SnapshotRecord>,
     ) -> Result<(), AppError> {
-        let dex = self.pool_types.get(&update.pool).ok_or_else(|| {
+        let pool_types = self.pool_types.lock().await;
+        let dex = pool_types.get(&update.pool).ok_or_else(|| {
             AppError::DecodingError(format!("Unknown pool type for {}", update.pool))
         })?;
+        let dex = *dex; // Copy the enum value
+        drop(pool_types); // Release lock early
 
         match dex {
             DexType::PumpFun => {
@@ -127,11 +155,12 @@ impl Orchestrator {
                 // Get mint addresses from pool data (Pump.fun specific)
                 // For Pump.fun, we need to decode the bonding curve to get quote_mint
                 // For simplicity, assume quote is always SOL for Pump.fun
-                let base_mint = self
-                    .pool_token_mints
+                let pool_token_mints = self.pool_token_mints.lock().await;
+                let base_mint = pool_token_mints
                     .get(&update.pool)
                     .cloned()
                     .unwrap_or_default();
+                drop(pool_token_mints);
                 let quote_mint = "So11111111111111111111111111111111111111112"; // SOL
 
                 // Fetch decimals
@@ -168,7 +197,7 @@ impl Orchestrator {
                 let snapshot = PoolSnapshot::with_liquidity(
                     update.pool.to_string(),
                     base_mint.to_string(),
-                    *dex,
+                    dex,
                     reserve_base,
                     reserve_quote,
                     chrono::Utc::now().timestamp(),
@@ -179,7 +208,7 @@ impl Orchestrator {
                 tx_snap
                     .send(SnapshotRecord {
                         snapshot,
-                        dex_type: *dex,
+                        dex_type: dex,
                     })
                     .await
                     .map_err(|e| AppError::CsvError(format!("Send snapshot error: {}", e)))?;
@@ -233,7 +262,7 @@ impl Orchestrator {
                 let snapshot = PoolSnapshot::with_liquidity(
                     update.pool.to_string(),
                     base_mint.to_string(),
-                    *dex,
+                    dex,
                     reserve_base,
                     reserve_quote,
                     chrono::Utc::now().timestamp(),
@@ -244,7 +273,7 @@ impl Orchestrator {
                 tx_snap
                     .send(SnapshotRecord {
                         snapshot,
-                        dex_type: *dex,
+                        dex_type: dex,
                     })
                     .await
                     .map_err(|e| AppError::CsvError(format!("Send snapshot error: {}", e)))?;
@@ -318,15 +347,17 @@ impl Orchestrator {
                     .await
                     .unwrap_or(0.0);
 
-                let token_mint = self
-                    .pool_token_mints
+                let pool_token_mints = self.pool_token_mints.lock().await;
+                let token_mint = pool_token_mints
                     .get(&update.pool)
                     .cloned()
                     .unwrap_or_default();
+                drop(pool_token_mints);
+
                 let snapshot = PoolSnapshot::with_liquidity(
                     update.pool.to_string(),
                     token_mint.to_string(),
-                    *dex,
+                    dex,
                     reserve_base,
                     reserve_quote,
                     chrono::Utc::now().timestamp(),
@@ -337,7 +368,7 @@ impl Orchestrator {
                 tx_snap
                     .send(SnapshotRecord {
                         snapshot,
-                        dex_type: *dex,
+                        dex_type: dex,
                     })
                     .await
                     .map_err(|e| AppError::CsvError(format!("Send snapshot error: {}", e)))?;

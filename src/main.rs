@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use datanalyzer::config::AppConfig;
+use datanalyzer::discovery::PoolDiscovery;
 use datanalyzer::oracle::{JupiterQuoteOracle, OracleConfig};
 use datanalyzer::orchestrator::{Orchestrator, PoolUpdate};
 use datanalyzer::token_metadata::TokenMetadataProvider;
@@ -87,6 +88,56 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         })
     };
+
+    // Run discovery backfill if enabled
+    if runtime_cfg.discovery.enable_pumpswap {
+        log::info!("Starting PumpSwap pool discovery...");
+        let discovery = match PoolDiscovery::new(
+            runtime_cfg.discovery.clone(),
+            runtime_cfg.rpc_url.clone(),
+        ) {
+            Ok(d) => d,
+            Err(e) => {
+                log::error!("Failed to create discovery service: {}", e);
+                return Err(e.into());
+            }
+        };
+
+        // Backfill existing pools
+        match discovery.backfill_pumpswap_pools().await {
+            Ok(discovered_pools) => {
+                log::info!(
+                    "Discovery backfill found {} pools",
+                    discovered_pools.len()
+                );
+
+                // Register discovered pools with orchestrator
+                for pool_config in discovered_pools {
+                    let pool_addr = *pool_config.pool_address();
+                    
+                    // Register with orchestrator
+                    if let Err(e) = orch.register_pool(pool_config).await {
+                        log::warn!("Failed to register pool {}: {}", pool_addr, e);
+                        continue;
+                    }
+
+                    // Subscribe to pool updates
+                    if let Err(e) = ws.subscribe_pool(pool_addr).await {
+                        log::warn!("Failed to subscribe to pool {}: {}", pool_addr, e);
+                    }
+                }
+
+                log::info!(
+                    "Successfully subscribed to {} discovered pools",
+                    discovery.discovered_count().await
+                );
+            }
+            Err(e) => {
+                log::error!("Discovery backfill failed: {}", e);
+                // Continue anyway with manually configured pools
+            }
+        }
+    }
 
     // Callback: push to queue
     let tx_cb = tx.clone();
