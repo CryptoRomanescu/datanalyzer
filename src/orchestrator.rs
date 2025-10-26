@@ -83,7 +83,7 @@ impl Orchestrator {
     pub async fn run(
         self: Arc<Self>,
         mut rx: mpsc::Receiver<PoolUpdate>,
-        workers: usize,
+        _workers: usize,
     ) -> Result<(), AppError> {
         let (tx_snap, mut rx_snap) = mpsc::channel::<SnapshotRecord>(1024);
 

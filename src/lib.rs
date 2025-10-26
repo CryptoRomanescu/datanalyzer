@@ -27,7 +27,7 @@ pub use error::AppError;
 pub use healthcheck::{AppState, HealthResponse, ReadinessResponse};
 pub use metrics::WebSocketMetrics;
 pub use models::{DexType, PoolSnapshot};
-pub use orchestrator::{ReserveInfo, ReserveOrchestrator};
+pub use orchestrator::Orchestrator;
 pub use price_fetcher::{CachedPrice, PriceFetcher, PriceFetcherMetrics};
 pub use price_provider::{
     CircuitBreaker, CircuitBreakerState, CoinGeckoPriceProvider, FallbackPriceProvider,

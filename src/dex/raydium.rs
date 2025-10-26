@@ -39,7 +39,6 @@
 /// an async RPC client, which is beyond the scope of this synchronous decoder trait.
 use crate::dex::DexDecoder;
 use crate::error::AppError;
-use crate::orchestrator;
 use bytemuck::{Pod, Zeroable};
 use solana_sdk::pubkey::Pubkey;
 
@@ -336,24 +335,6 @@ impl RaydiumDecoder {
         self.validate_account(account_data)?;
         let amm_info = Self::deserialize_amm_info(account_data)?;
         Ok(VaultInfo::from_amm_info(amm_info))
-    }
-
-    /// Decode reserve information from account data.
-    ///
-    /// This method returns ReserveInfo which indicates that vault accounts
-    /// need to be fetched to get actual reserves.
-    ///
-    /// # Arguments
-    ///
-    /// * `account_data` - Raw account data bytes from Solana
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(ReserveInfo)` - Reserve information (RequiresVaults variant)
-    /// * `Err(AppError)` - If data is invalid
-    pub fn decode_reserve_info(&self, account_data: &[u8]) -> Result<orchestrator::ReserveInfo, AppError> {
-        let vault_info = self.get_vault_info(account_data)?;
-        Ok(orchestrator::ReserveInfo::RequiresVaults(vault_info))
     }
 }
 
@@ -719,25 +700,6 @@ mod tests {
 
         assert_eq!(vault_info.coin_vault, coin_vault);
         assert_eq!(vault_info.pc_vault, pc_vault);
-    }
-
-    #[test]
-    fn test_decode_reserve_info() {
-        let decoder = RaydiumDecoder;
-        let data = create_test_amm_info();
-
-        let reserve_info = decoder.decode_reserve_info(&data).unwrap();
-
-        match reserve_info {
-            crate::orchestrator::ReserveInfo::RequiresVaults(vault_info) => {
-                // Verify we got vault info
-                assert_ne!(vault_info.coin_vault, Pubkey::default());
-                assert_ne!(vault_info.pc_vault, Pubkey::default());
-                assert_ne!(vault_info.coin_mint, Pubkey::default());
-                assert_ne!(vault_info.pc_mint, Pubkey::default());
-            }
-            _ => panic!("Expected RequiresVaults variant for Raydium"),
-        }
     }
 
     #[test]
