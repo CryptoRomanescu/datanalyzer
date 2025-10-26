@@ -1,23 +1,55 @@
-rpc_url = "https://mainnet.helius-rpc.com/?api-key=d1add126-fcbf-4856-935a-0f609eec91bc"
-rpc_ws_url = "wss://mainnet.helius-rpc.com/?api-key=d1add126-fcbf-4856-935a-0f609eec91bc"
+# == Helius mainnet ==
+rpc_url = "https://mainnet.helius-rpc.com/?api-key=d1add126-fcbf-4856-9356-935a-0f609eec91bc"
+rpc_ws_url = "wss://mainnet.helius-rpc.com/?api-key=d1add126-fcbf-4856-9356-935a-0f609eec91bc"
+
+# Wyjście CSV i interwał snapshotów
 output_dir = "./snapshots"
 snapshot_interval_ms = 1000
 
-[[pools]]
-pool_address = "So11111111111111111111111111111111111111112"
-dex_type = "pumpfun"
-token_mint = "So11111111111111111111111111111111111111112"
+# == CSV ==
+[csv]
+append = true
+max_file_size = 500000000   # 500 MB (0 = wyłącz rotację po rozmiarze)
+max_file_age = 0            # 0 = wyłącz rotację po wieku
+batch_size = 500
+batch_time_ms = 3000
 
+# == Oracle ==
+[oracle]
+# Stable mints: LISTA adresów MINT (Pubkey) stablecoinów -> traktowane jako 1.0 USD
+stable_mints = [
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", # USDC (classic SPL)
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", # USDT
+]
+
+# Cena quote->USD dla niestabilnych quote (np. SOL) z Jupiter; cache 60s
+jupiter_url = "https://price.jup.ag/v4"
+ttl_secs = 60
+
+# == Pule ==
+# Raydium AMM v4 program: 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8
+# Uwaga:
+# - dex_type: "raydium" lub "pumpfun"
+# - pool_address: adres konta puli (Raydium: AMM id)
+# - token_mint: MINT tokenu bazowego (BASE) w puli
+
+# Raydium: SOL/USDC (BASE = SOL)
 [[pools]]
-pool_address = "H6S9LyzexampleRaydiumPoolAddressHereABCDEFG"
+pool_address = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"
 dex_type = "raydium"
-token_mint = "Es9vMFrzaCEXexampleUSDTmintXXXXXXXXXXXXXXXX" # przykład
+token_mint = "So11111111111111111111111111111111111111112"  # BASE = SOL
 
-# Opcjonalna mapa mint -> CoinGecko token_id (dla bazowego tokena z pooli)
-[[mint_map]]
-mint = "Es9vMFrzaCEXexampleUSDTmintXXXXXXXXXXXXXXXX"
-coingecko_id = "tether"
+# Raydium: USDT/SOL (BASE = USDT)
+[[pools]]
+pool_address = "3K6rftdAaQYMPunrtNRtvKC845PEFpGW9ihRo2Qit5RW"
+dex_type = "raydium"
+token_mint = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"  # BASE = USDT
 
-[[mint_map]]
-mint = "EPjFWdd5AufqSSqeM2qZexampleUSDCmintXXXXXXXX"
-coingecko_id = "usd-coin"
+# Jeśli chcesz dodać Pump.fun:
+# - bonding curve (program: 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P)
+# - "pool" to PDA: seeds ["bonding-curve", mint] => wpisz wynikowy PDA jako pool_address
+# Przykład (po wyliczeniu PDA):
+# [[pools]]
+# pool_address = "<PDA_Z_BONDING_CURVE>"
+# dex_type = "pumpfun"
+# token_mint = "<BASE_MINT>"
