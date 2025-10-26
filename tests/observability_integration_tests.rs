@@ -5,7 +5,6 @@
 /// - Healthcheck endpoints
 /// - Connection state tracking
 /// - Reconnection with metrics
-
 #[cfg(test)]
 mod observability_tests {
     use datanalyzer::{
@@ -53,7 +52,7 @@ mod observability_tests {
         let state = AppState::new(registry);
 
         // Initial state
-        assert_eq!(*state.websocket_connected.read().await, false);
+        assert!(!(*state.websocket_connected.read().await));
         assert_eq!(*state.active_subscriptions.read().await, 0);
         assert_eq!(*state.problematic_pools.read().await, 0);
 
@@ -63,7 +62,7 @@ mod observability_tests {
         state.set_problematic_pools(2).await;
 
         // Verify updates
-        assert_eq!(*state.websocket_connected.read().await, true);
+        assert!(*state.websocket_connected.read().await);
         assert_eq!(*state.active_subscriptions.read().await, 5);
         assert_eq!(*state.problematic_pools.read().await, 2);
     }

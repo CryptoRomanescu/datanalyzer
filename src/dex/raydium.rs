@@ -414,25 +414,23 @@ mod tests {
         let mut data = vec![0u8; RaydiumDecoder::ACCOUNT_SIZE];
 
         // Create a minimal valid AmmInfo structure
-        let mut amm_info = AmmInfo::default();
-
-        // Set status to Initialized (1)
-        amm_info.status = 1;
-        amm_info.nonce = 255;
-        amm_info.coin_decimals = 9; // SOL decimals
-        amm_info.pc_decimals = 6; // USDC decimals
-
-        // Set vault pubkeys (non-default)
-        amm_info.coin_vault = Pubkey::new_unique();
-        amm_info.pc_vault = Pubkey::new_unique();
-        amm_info.coin_vault_mint = Pubkey::new_unique();
-        amm_info.pc_vault_mint = Pubkey::new_unique();
-        amm_info.lp_mint = Pubkey::new_unique();
-        amm_info.open_orders = Pubkey::new_unique();
-        amm_info.market = Pubkey::new_unique();
-        amm_info.market_program = Pubkey::new_unique();
-        amm_info.target_orders = Pubkey::new_unique();
-        amm_info.amm_owner = Pubkey::new_unique();
+        let amm_info = AmmInfo {
+            status: 1,
+            nonce: 255,
+            coin_decimals: 9,
+            pc_decimals: 6,
+            coin_vault: Pubkey::new_unique(),
+            pc_vault: Pubkey::new_unique(),
+            coin_vault_mint: Pubkey::new_unique(),
+            pc_vault_mint: Pubkey::new_unique(),
+            lp_mint: Pubkey::new_unique(),
+            open_orders: Pubkey::new_unique(),
+            market: Pubkey::new_unique(),
+            market_program: Pubkey::new_unique(),
+            target_orders: Pubkey::new_unique(),
+            amm_owner: Pubkey::new_unique(),
+            ..Default::default()
+        };
 
         // Copy the structure to bytes
         let amm_bytes = bytemuck::bytes_of(&amm_info);
@@ -601,35 +599,34 @@ mod tests {
     #[test]
     fn test_realistic_pool_structure() {
         let mut data = vec![0u8; RaydiumDecoder::ACCOUNT_SIZE];
-        let mut amm_info = AmmInfo::default();
-
-        // Set realistic values for a SOL/USDC pool
-        amm_info.status = 6; // SwapOnly status
-        amm_info.nonce = 255;
-        amm_info.order_num = 10;
-        amm_info.depth = 5;
-        amm_info.coin_decimals = 9; // SOL
-        amm_info.pc_decimals = 6; // USDC
-        amm_info.state = 1; // IdleState
-        amm_info.sys_decimal_value = 1_000_000_000; // 10^9
-
-        // Set fee structure (typical 0.25% = 25/10000)
-        amm_info.fees.trade_fee_numerator = 25;
-        amm_info.fees.trade_fee_denominator = 10000;
-        amm_info.fees.swap_fee_numerator = 25;
-        amm_info.fees.swap_fee_denominator = 10000;
-
-        // Set vault pubkeys
-        amm_info.coin_vault = Pubkey::new_unique();
-        amm_info.pc_vault = Pubkey::new_unique();
-        amm_info.coin_vault_mint = Pubkey::new_unique();
-        amm_info.pc_vault_mint = Pubkey::new_unique();
-        amm_info.lp_mint = Pubkey::new_unique();
-        amm_info.open_orders = Pubkey::new_unique();
-        amm_info.market = Pubkey::new_unique();
-        amm_info.market_program = Pubkey::new_unique();
-        amm_info.target_orders = Pubkey::new_unique();
-        amm_info.amm_owner = Pubkey::new_unique();
+        let amm_info = AmmInfo {
+            status: 6,
+            nonce: 255,
+            order_num: 10,
+            depth: 5,
+            coin_decimals: 9,
+            pc_decimals: 6,
+            state: 1,
+            sys_decimal_value: 1_000_000_000,
+            fees: Fees {
+                trade_fee_numerator: 25,
+                trade_fee_denominator: 10000,
+                swap_fee_numerator: 25,
+                swap_fee_denominator: 10000,
+                ..Default::default()
+            },
+            coin_vault: Pubkey::new_unique(),
+            pc_vault: Pubkey::new_unique(),
+            coin_vault_mint: Pubkey::new_unique(),
+            pc_vault_mint: Pubkey::new_unique(),
+            lp_mint: Pubkey::new_unique(),
+            open_orders: Pubkey::new_unique(),
+            market: Pubkey::new_unique(),
+            market_program: Pubkey::new_unique(),
+            target_orders: Pubkey::new_unique(),
+            amm_owner: Pubkey::new_unique(),
+            ..Default::default()
+        };
 
         // Copy to bytes
         let amm_bytes = bytemuck::bytes_of(&amm_info);

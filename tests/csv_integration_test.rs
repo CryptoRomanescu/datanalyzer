@@ -6,7 +6,7 @@
 /// 3. CSV writer works with the configuration
 /// 4. Rotation and batching work as configured
 use datanalyzer::config::{AppConfig, CsvConfig};
-use datanalyzer::csv_writer::{CsvWriter, CsvWriterConfig};
+use datanalyzer::csv_writer::CsvWriter;
 use datanalyzer::models::{DexType, PoolSnapshot};
 use std::fs;
 use std::io::Write;
@@ -15,7 +15,7 @@ use std::io::Write;
 fn test_csv_config_default_values() {
     let config = CsvConfig::default();
 
-    assert_eq!(config.append, true);
+    assert!(config.append);
     assert_eq!(config.max_file_size, 500_000_000);
     assert_eq!(config.max_file_age, 0);
     assert_eq!(config.batch_size, 500);
@@ -34,7 +34,7 @@ fn test_csv_config_to_writer_config() {
 
     let writer_config = csv_config.to_csv_writer_config();
 
-    assert_eq!(writer_config.append, true);
+    assert!(writer_config.append);
     assert_eq!(writer_config.max_file_size, 1_000_000);
     assert_eq!(writer_config.max_file_age, 3600);
     assert_eq!(writer_config.batch_size, 100);
@@ -43,8 +43,6 @@ fn test_csv_config_to_writer_config() {
 
 #[test]
 fn test_csv_config_from_toml() {
-    use solana_sdk::pubkey::Pubkey;
-
     let toml_content = r#"
 rpc_url = "https://api.mainnet-beta.solana.com"
 rpc_ws_url = "wss://api.mainnet-beta.solana.com"
@@ -70,7 +68,7 @@ token_mint = "So11111111111111111111111111111111111111112"
 
     let config = AppConfig::load(temp_path).unwrap();
 
-    assert_eq!(config.csv.append, true);
+    assert!(config.csv.append);
     assert_eq!(config.csv.max_file_size, 500_000_000);
     assert_eq!(config.csv.max_file_age, 0);
     assert_eq!(config.csv.batch_size, 500);
@@ -106,7 +104,7 @@ token_mint = "So11111111111111111111111111111111111111112"
     assert_eq!(config.csv.batch_size, 1000);
 
     // Default values
-    assert_eq!(config.csv.append, true);
+    assert!(config.csv.append);
     assert_eq!(config.csv.max_file_size, 500_000_000);
     assert_eq!(config.csv.max_file_age, 0);
     assert_eq!(config.csv.batch_time_ms, 3000);
@@ -155,7 +153,7 @@ fn test_csv_writer_with_config_from_toml() {
         )
         .unwrap();
 
-        writer.write_record(&snapshot.to_csv_row()).unwrap();
+        writer.write_record(snapshot.to_csv_row()).unwrap();
         writer.flush().unwrap();
     }
 
@@ -209,7 +207,7 @@ fn test_csv_writer_batching_from_config() {
         )
         .unwrap();
 
-        writer.write_record(&snapshot.to_csv_row()).unwrap();
+        writer.write_record(snapshot.to_csv_row()).unwrap();
     }
 
     assert_eq!(writer.records_written(), 3);
@@ -227,7 +225,7 @@ fn test_csv_writer_batching_from_config() {
         )
         .unwrap();
 
-        writer.write_record(&snapshot.to_csv_row()).unwrap();
+        writer.write_record(snapshot.to_csv_row()).unwrap();
     }
 
     // After batch_size=5, should have flushed and reset counter
