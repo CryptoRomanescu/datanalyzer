@@ -132,6 +132,43 @@ The `[csv]` section controls CSV file writing behavior with support for rotation
 
 **File Rotation**: When rotation is triggered (by size or age), the current file is renamed to `{basename}_{timestamp}.csv` (e.g., `raydium_58oQChx4.csv` → `raydium_58oQChx4_1730000000.csv`) and a new file with the original name is created with headers.
 
+#### Raydium Pool Address Resolver Configuration
+
+The `[raydium_resolver]` section enables automatic validation and resolution of Raydium pool addresses:
+
+- **`enabled`** (bool): Enable the Raydium pool address resolver. Default: `true`
+- **`api_url`** (string): URL of the Raydium API endpoint. Default: `"https://api.raydium.io/v2/sdk/liquidity/mainnet.json"`
+- **`timeout_secs`** (u64): Request timeout in seconds. Default: `10`
+
+**What it does**:
+1. **Validates Pool Addresses**: On startup, fetches the official list of Raydium AMM pools and validates that your configured pool addresses exist
+2. **Address Resolution**: Can resolve marketId or LP mint addresses to the canonical AMM pool address (ammId)
+3. **Program Verification**: Logs warnings if a configured address doesn't belong to the Raydium AMM v4 program
+4. **Non-blocking**: If the API fetch fails, the service continues with your configured addresses and logs a warning
+
+**Example usage**:
+```toml
+[raydium_resolver]
+enabled = true
+api_url = "https://api.raydium.io/v2/sdk/liquidity/mainnet.json"
+timeout_secs = 10
+
+[[pools]]
+pool_address = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"  # SOL/USDC AMM
+dex_type = "raydium"
+token_mint = "So11111111111111111111111111111111111111112"
+```
+
+On startup, you'll see:
+```
+✓ Raydium resolver loaded 500 official pools
+✓ Verified Raydium pool address: 58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2
+First update for pool 58oQ...: owner=675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8, data_length=752 bytes
+✓ Verified Raydium AMM v4 program for pool 58oQ...
+```
+
+**Why this matters**: Raydium has multiple program versions (AMM v4, CLMM v5). The resolver ensures you're using AMM v4 pools (752 bytes, program `675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8`), not CLMM pools which have different structure.
+
 #### Pool Discovery Configuration
 
 The `[discovery]` section enables automatic pool discovery for PumpSwap:

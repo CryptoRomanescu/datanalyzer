@@ -93,11 +93,32 @@ mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 coingecko_id = "usd-coin"
 cache_ttl_secs = 600
 
+# Raydium Pool Address Resolver Configuration
+[raydium_resolver]
+# Enable Raydium pool address resolver (default: true)
+# When enabled, validates and resolves pool addresses using Raydium's official API
+# This helps ensure you're using the correct AMM pool addresses and can map
+# marketId or LP mint addresses to the canonical AMM pool address (ammId)
+enabled = true
+
+# Raydium API URL (default: https://api.raydium.io/v2/sdk/liquidity/mainnet.json)
+api_url = "https://api.raydium.io/v2/sdk/liquidity/mainnet.json"
+
+# Request timeout in seconds (default: 10)
+timeout_secs = 10
+
 # Pool configurations
+# For Raydium pools, use the AMM pool address (ammId), not marketId or LP mint
+# The resolver will validate these addresses on startup
 [[pools]]
-pool_address = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"
+pool_address = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"  # SOL/USDC Raydium AMM
 dex_type = "raydium"
-token_mint = "So11111111111111111111111111111111111111112"
+token_mint = "So11111111111111111111111111111111111111112"  # SOL
+
+[[pools]]
+pool_address = "7XawhbbxtsRcQA8KTkHT9f9nc6d69UwqCDh6U5EEbEmX"  # SOL/USDT Raydium AMM
+dex_type = "raydium"
+token_mint = "So11111111111111111111111111111111111111112"  # SOL
 
 [[pools]]
 pool_address = "CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM"
