@@ -258,6 +258,86 @@ mv ./data/pools.csv ./data/pools_$(date +%Y%m%d_%H%M%S).csv
 
 ## Troubleshooting
 
+### Raydium Pool Configuration Issues
+
+**Symptom**: Logs show "Failed to decode account data" or "Invalid Raydium account size"
+
+**Diagnosis**:
+```bash
+# Check pool configuration in logs
+journalctl -u datanalyzer | grep -i "pool.*raydium"
+
+# Verify pool owner and data length
+journalctl -u datanalyzer | grep "First update for pool"
+
+# Expected output:
+# First update for pool 58oQ...: owner=675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8, data_length=752 bytes
+# ✓ Verified Raydium AMM v4 program for pool 58oQ...
+```
+
+**Common Issues & Solutions**:
+
+1. **Wrong pool address or program type**:
+   ```
+   ⚠ Pool 58oQ... owner 5quBto... is not Raydium AMM v4 (expected 675kPX9...)
+   ```
+   **Solution**: Pool is Raydium CLMM (v5), not AMM v4. Use a different pool or update decoder.
+
+2. **Invalid Raydium account size: expected 752 bytes, got 1232 bytes**:
+   **Solution**: This is a Raydium CLMM pool. Use Raydium AMM v4 pools only.
+   **Expected Raydium AMM v4 program**: `675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8`
+   **Expected account size**: 752 bytes
+
+3. **Pool not found in Raydium API**:
+   ```
+   ⚠ Pool address ABC... not found in Raydium API. Proceeding anyway (may be a new pool).
+   ```
+   **Solution**: Either the pool is very new or the address is incorrect. Verify via:
+   ```bash
+   # Manual verification using Solana CLI or RPC
+   solana account <pool_address> --url https://api.mainnet-beta.solana.com
+   
+   # Check owner field should be: 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8
+   # Check data length should be: 752
+   ```
+
+4. **Resolver fetch failed**:
+   ```
+   Failed to fetch Raydium pool data: HTTP request failed. Continuing with original addresses.
+   ```
+   **Solution**: 
+   - Network connectivity issue or Raydium API is down
+   - Service continues with configured addresses
+   - You can disable resolver: `[raydium_resolver] enabled = false`
+
+**Manual Pool Verification**:
+```bash
+# Using curl and jq to verify a pool via RPC
+POOL="58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"
+curl -s -X POST https://api.mainnet-beta.solana.com \
+  -H "Content-Type: application/json" \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getAccountInfo\",\"params\":[\"$POOL\",{\"encoding\":\"base64\"}]}" \
+  | jq '.result.value | {owner: .owner, size: (.data[0] | length)}'
+
+# Expected output:
+# {
+#   "owner": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
+#   "size": 1004
+# }
+# Note: Base64 encoding adds ~33% overhead: 752 raw bytes = 1004 base64 characters (4:3 ratio)
+```
+
+**Using Raydium Resolver to find pools**:
+```bash
+# Fetch current Raydium pools
+curl -s "https://api.raydium.io/v2/sdk/liquidity/mainnet.json" | \
+  jq '.official[] | select(.baseMint == "So11111111111111111111111111111111111111112") | 
+      select(.quoteMint == "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v") |
+      {id, baseMint, quoteMint, programId}'
+
+# Find SOL/USDC AMM pools
+```
+
 ### WebSocket Connection Issues
 
 **Symptom**: Health check shows `"websocket": "disconnected"`

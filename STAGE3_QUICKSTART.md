@@ -53,12 +53,23 @@ rpc_ws_url = "wss://api.mainnet-beta.solana.com"
 output_dir = "./snapshots"
 snapshot_interval_ms = 5000
 
-[persistence]
-max_file_size_bytes = 10485760  # 10MB
+[csv]
+append = true
+max_file_size = 10485760  # 10MB
 batch_size = 100
+batch_time_ms = 3000
+
+[raydium_resolver]
+enabled = true
+
+# Verified Raydium AMM v4 pools (752 bytes)
+[[pools]]
+pool_address = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"  # SOL/USDC
+dex_type = "raydium"
+token_mint = "So11111111111111111111111111111111111111112"
 
 [[pools]]
-pool_address = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"
+pool_address = "7XawhbbxtsRcQA8KTkHT9f9nc6d69UwqCDh6U5EEbEmX"  # SOL/USDT
 dex_type = "raydium"
 token_mint = "So11111111111111111111111111111111111111112"
 ```
@@ -69,7 +80,8 @@ Load and use:
 use datanalyzer::AppConfig;
 
 let config = AppConfig::load("config.toml")?;
-println!("Batch size: {}", config.persistence.batch_size);
+// Note: batch_size moved from persistence to csv config in recent versions
+println!("Batch size: {}", config.csv.batch_size);
 ```
 
 ## Configuration Options

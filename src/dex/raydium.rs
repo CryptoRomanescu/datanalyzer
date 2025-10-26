@@ -42,6 +42,9 @@ use crate::error::AppError;
 use bytemuck::{Pod, Zeroable};
 use solana_sdk::pubkey::Pubkey;
 
+/// Raydium AMM V4 program ID on Solana mainnet
+pub const RAYDIUM_AMM_V4_PROGRAM_ID: &str = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8";
+
 /// Fee structure for Raydium AMM pools.
 ///
 /// Contains various fee ratios used in AMM operations:
@@ -297,10 +300,21 @@ impl RaydiumDecoder {
     /// * `Err(AppError)` - If data is invalid or wrong size
     fn deserialize_amm_info(account_data: &[u8]) -> Result<&AmmInfo, AppError> {
         if account_data.len() != Self::ACCOUNT_SIZE {
+            // Generate hex dump of first 16 bytes for diagnosis
+            let hex_dump = account_data
+                .iter()
+                .take(16)
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<_>>()
+                .join("");
+            
             return Err(AppError::DecodingError(format!(
-                "Invalid Raydium account size: expected {}, got {}",
+                "Invalid Raydium account size: expected {} bytes, got {} bytes. \
+                 First 16 bytes (hex): {}. \
+                 This may indicate a different program or pool type.",
                 Self::ACCOUNT_SIZE,
-                account_data.len()
+                account_data.len(),
+                hex_dump
             )));
         }
 
@@ -370,10 +384,21 @@ impl DexDecoder for RaydiumDecoder {
     fn validate_account(&self, account_data: &[u8]) -> Result<(), AppError> {
         // Check account size
         if account_data.len() != Self::ACCOUNT_SIZE {
+            // Generate hex dump of first 16 bytes for diagnosis
+            let hex_dump = account_data
+                .iter()
+                .take(16)
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<_>>()
+                .join("");
+            
             return Err(AppError::DecodingError(format!(
-                "Invalid Raydium account size: expected {}, got {}",
+                "Invalid Raydium account size: expected {} bytes, got {} bytes. \
+                 First 16 bytes (hex): {}. \
+                 Expected Raydium AMM v4 program: 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
                 Self::ACCOUNT_SIZE,
-                account_data.len()
+                account_data.len(),
+                hex_dump
             )));
         }
 

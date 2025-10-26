@@ -139,6 +139,63 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    // Raydium pool address resolver (optional)
+    if runtime_cfg.raydium_resolver.enabled {
+        log::info!("Raydium pool address resolver is enabled, fetching pool data...");
+        
+        let resolver = datanalyzer::RaydiumResolver::with_config(
+            runtime_cfg.raydium_resolver.api_url.clone(),
+            runtime_cfg.raydium_resolver.timeout_secs,
+        );
+        
+        match resolver.fetch_pool_data().await {
+            Ok(()) => {
+                let pool_count = resolver.pool_count().await;
+                log::info!("✓ Raydium resolver loaded {} official pools", pool_count);
+                
+                // Validate pool addresses for Raydium pools
+                for pool_cfg in &runtime_cfg.pools {
+                    // Only validate Raydium pools
+                    if pool_cfg.dex_type() != datanalyzer::DexType::Raydium {
+                        continue;
+                    }
+                    
+                    let current_addr = pool_cfg.pool_address().to_string();
+                    match resolver.resolve(&current_addr).await {
+                        Ok(Some(resolved_addr)) => {
+                            if resolved_addr == current_addr {
+                                log::info!("✓ Verified Raydium pool address: {}", current_addr);
+                            } else {
+                                log::warn!(
+                                    "Pool address {} resolved to different address {}. Using configured address.",
+                                    current_addr,
+                                    resolved_addr
+                                );
+                            }
+                        }
+                        Ok(None) => {
+                            log::warn!(
+                                "⚠ Pool address {} not found in Raydium API. Proceeding anyway (may be a new pool).",
+                                current_addr
+                            );
+                        }
+                        Err(e) => {
+                            log::debug!("Failed to resolve pool {}: {}", current_addr, e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to fetch Raydium pool data: {}. Continuing with original addresses.",
+                    e
+                );
+            }
+        }
+    } else {
+        log::debug!("Raydium pool address resolver is disabled");
+    }
+
     // Callback: push to queue
     let tx_cb = tx.clone();
     let callback: AccountUpdateCallback =

@@ -1,6 +1,10 @@
 # == Helius mainnet ==
-rpc_url = "https://mainnet.helius-rpc.com/?api-key=d1add126-fcbf-4856-9356-935a-0f609eec91bc"
-rpc_ws_url = "wss://mainnet.helius-rpc.com/?api-key=d1add126-fcbf-4856-9356-935a-0f609eec91bc"
+rpc_url = "https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY_HERE"
+rpc_ws_url = "wss://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY_HERE"
+
+# Alternatively, use public endpoints (may have rate limits):
+# rpc_url = "https://api.mainnet-beta.solana.com"
+# rpc_ws_url = "wss://api.mainnet-beta.solana.com"
 
 # Wyjście CSV i interwał snapshotów
 output_dir = "./snapshots"
@@ -34,16 +38,18 @@ ttl_secs = 60
 # - token_mint: MINT tokenu bazowego (BASE) w puli
 
 # Raydium: SOL/USDC (BASE = SOL)
+# This is a verified Raydium AMM v4 pool (752 bytes)
 [[pools]]
 pool_address = "58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2"
 dex_type = "raydium"
 token_mint = "So11111111111111111111111111111111111111112"  # BASE = SOL
 
-# Raydium: USDT/SOL (BASE = USDT)
+# Raydium: SOL/USDT (BASE = SOL, QUOTE = USDT)
+# This is a verified Raydium AMM v4 pool (752 bytes)
 [[pools]]
-pool_address = "3K6rftdAaQYMPunrtNRtvKC845PEFpGW9ihRo2Qit5RW"
+pool_address = "7XawhbbxtsRcQA8KTkHT9f9nc6d69UwqCDh6U5EEbEmX"
 dex_type = "raydium"
-token_mint = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"  # BASE = USDT
+token_mint = "So11111111111111111111111111111111111111112"  # BASE = SOL
 
 # Jeśli chcesz dodać Pump.fun:
 # - bonding curve (program: 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P)
