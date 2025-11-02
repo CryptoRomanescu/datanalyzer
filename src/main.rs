@@ -44,7 +44,8 @@ async fn initial_backfill(rpc_url: &str, pools: &[Pubkey]) -> Vec<PoolUpdate> {
 
     log::info!("Initial backfill: fetching {} accounts from RPC ...", pools.len());
     
-    let rpc_client = RpcClient::new(rpc_url.to_string());
+    // Create RPC client with 30-second timeout to prevent indefinite blocking
+    let rpc_client = RpcClient::new_with_timeout(rpc_url.to_string(), Duration::from_secs(30));
     
     // Fetch all accounts in one batch call with confirmed commitment
     let accounts_result = rpc_client.get_multiple_accounts_with_commitment(
@@ -103,7 +104,8 @@ async fn initial_backfill(rpc_url: &str, pools: &[Pubkey]) -> Vec<PoolUpdate> {
             );
         }
         Err(e) => {
-            log::error!("Initial backfill failed: {}", e);
+            log::error!("Initial backfill RPC request failed: {}", e);
+            log::warn!("Continuing startup without initial backfill data. WebSocket updates will provide data once available.");
         }
     }
     
@@ -270,10 +272,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let backfilled_updates = initial_backfill(&runtime_cfg.rpc_url, &pools).await;
     
     // Enqueue all backfilled updates into the orchestrator queue
+    let total_backfilled = backfilled_updates.len();
+    let mut enqueued_count = 0;
     for update in backfilled_updates {
         if let Err(e) = tx.send(update).await {
             log::warn!("Failed to enqueue backfilled update: {}", e);
+        } else {
+            enqueued_count += 1;
         }
+    }
+    
+    if total_backfilled > 0 {
+        log::info!(
+            "Enqueued {} / {} backfilled updates to orchestrator",
+            enqueued_count,
+            total_backfilled
+        );
     }
 
     // Run discovery backfill if enabled
