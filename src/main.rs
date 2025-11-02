@@ -13,7 +13,7 @@ use datanalyzer::orchestrator::{Orchestrator, PoolUpdate};
 use datanalyzer::token_metadata::TokenMetadataProvider;
 use datanalyzer::websocket::{AccountUpdateCallback, WebSocketManager};
 
-use solana_client::rpc_client::RpcClient;
+use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::mpsc;
@@ -36,7 +36,7 @@ fn parse_config_path(args: &[String]) -> String {
 /// 
 /// Fetches all target pool accounts in one batch call and returns PoolUpdate
 /// items for non-empty accounts. Logs details for each account.
-fn initial_backfill(rpc_url: &str, pools: &[Pubkey]) -> Vec<PoolUpdate> {
+async fn initial_backfill(rpc_url: &str, pools: &[Pubkey]) -> Vec<PoolUpdate> {
     if pools.is_empty() {
         log::info!("Initial backfill: no pools configured, skipping");
         return Vec::new();
@@ -50,7 +50,7 @@ fn initial_backfill(rpc_url: &str, pools: &[Pubkey]) -> Vec<PoolUpdate> {
     let accounts_result = rpc_client.get_multiple_accounts_with_commitment(
         pools,
         CommitmentConfig::confirmed(),
-    );
+    ).await;
     
     let mut updates = Vec::new();
     
@@ -267,7 +267,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .collect();
 
     // Perform initial RPC backfill before Raydium resolver and WS listen
-    let backfilled_updates = initial_backfill(&runtime_cfg.rpc_url, &pools);
+    let backfilled_updates = initial_backfill(&runtime_cfg.rpc_url, &pools).await;
     
     // Enqueue all backfilled updates into the orchestrator queue
     for update in backfilled_updates {
