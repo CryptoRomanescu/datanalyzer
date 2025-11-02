@@ -16,6 +16,20 @@ use datanalyzer::websocket::{AccountUpdateCallback, WebSocketManager};
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::mpsc;
 
+/// Parse config path from command line arguments
+fn parse_config_path(args: &[String]) -> String {
+    let mut config_path = env::var("DATANALYZER_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
+    
+    for i in 0..args.len() {
+        if args[i] == "--config" && i + 1 < args.len() {
+            config_path = args[i + 1].clone();
+            break;
+        }
+    }
+    
+    config_path
+}
+
 /// Demo mode for Issue 1: Core runtime and CSV pipeline
 /// 
 /// Demonstrates:
@@ -25,18 +39,12 @@ use tokio::sync::mpsc;
 /// - Clean exit after writing a few rows
 async fn run_demo_mode(args: &[String]) -> Result<(), Box<dyn Error>> {
     use datanalyzer::csv_writer::CsvWriter;
-    use datanalyzer::models::{DexType, PoolSnapshot};
+    use datanalyzer::models::create_demo_snapshots;
     
     log::info!("Datanalyzer - Demo Mode (Issue 1)");
     
     // Parse config path
-    let mut config_path = "./config.toml".to_string();
-    for i in 0..args.len() {
-        if args[i] == "--config" && i + 1 < args.len() {
-            config_path = args[i + 1].clone();
-            break;
-        }
-    }
+    let config_path = parse_config_path(args);
     
     log::info!("Loading configuration from: {}", config_path);
     
@@ -74,37 +82,8 @@ async fn run_demo_mode(args: &[String]) -> Result<(), Box<dyn Error>> {
     
     log::info!("Writing synthetic pool snapshots...");
     
-    // Write a few synthetic PoolSnapshot rows for demonstration
-    let snapshots = vec![
-        PoolSnapshot::new(
-            "DemoPool1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
-            "TokenMint1AAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
-            DexType::Raydium,
-            1_000_000,
-            2_000_000,
-            chrono::Utc::now().timestamp(),
-            2.0,
-        )?,
-        PoolSnapshot::with_liquidity(
-            "DemoPool2BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_string(),
-            "TokenMint2BBBBBBBBBBBBBBBBBBBBBBBBBBB".to_string(),
-            DexType::PumpSwap,
-            500_000,
-            1_000_000,
-            chrono::Utc::now().timestamp(),
-            2.0,
-            1_000_000.0,
-        )?,
-        PoolSnapshot::new(
-            "DemoPool3CCCCCCCCCCCCCCCCCCCCCCCCCCCCCC".to_string(),
-            "TokenMint3CCCCCCCCCCCCCCCCCCCCCCCCCCC".to_string(),
-            DexType::PumpFun,
-            750_000,
-            1_500_000,
-            chrono::Utc::now().timestamp(),
-            2.0,
-        )?,
-    ];
+    // Generate synthetic snapshots using shared helper
+    let snapshots = create_demo_snapshots()?;
     
     // Write each snapshot to CSV
     for (i, snapshot) in snapshots.iter().enumerate() {
@@ -138,11 +117,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     log::info!("Datanalyzer (production) starting...");
 
     // Config path: --config <path> | DATANALYZER_CONFIG | ./config.toml
-    let mut config_path =
-        env::var("DATANALYZER_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
-    if args.len() >= 3 && args[1] == "--config" {
-        config_path = args[2].clone();
-    }
+    let config_path = parse_config_path(&args);
     log::info!("Loading config from: {}", &config_path);
 
     let app_cfg = AppConfig::load(&config_path)?;

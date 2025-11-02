@@ -126,6 +126,44 @@ impl PoolSnapshot {
     }
 }
 
+/// Create synthetic pool snapshots for demonstration/testing purposes
+/// 
+/// This is used by the demo mode and examples to generate consistent test data
+pub fn create_demo_snapshots() -> Result<Vec<PoolSnapshot>, crate::error::AppError> {
+    let timestamp = chrono::Utc::now().timestamp();
+    
+    Ok(vec![
+        PoolSnapshot::new(
+            "DemoPool1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            "TokenMint1AAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+            DexType::Raydium,
+            1_000_000,
+            2_000_000,
+            timestamp,
+            2.0,
+        )?,
+        PoolSnapshot::with_liquidity(
+            "DemoPool2BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_string(),
+            "TokenMint2BBBBBBBBBBBBBBBBBBBBBBBBBBB".to_string(),
+            DexType::PumpSwap,
+            500_000,
+            1_000_000,
+            timestamp,
+            2.0,
+            1_000_000.0,
+        )?,
+        PoolSnapshot::new(
+            "DemoPool3CCCCCCCCCCCCCCCCCCCCCCCCCCCCCC".to_string(),
+            "TokenMint3CCCCCCCCCCCCCCCCCCCCCCCCCCC".to_string(),
+            DexType::PumpFun,
+            750_000,
+            1_500_000,
+            timestamp,
+            2.0,
+        )?,
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

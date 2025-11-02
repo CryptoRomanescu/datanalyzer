@@ -9,7 +9,7 @@
 /// Usage: cargo run --example simple_csv_demo -- --config ./config.example.toml
 use datanalyzer::config::AppConfig;
 use datanalyzer::csv_writer::CsvWriter;
-use datanalyzer::models::{DexType, PoolSnapshot};
+use datanalyzer::models::create_demo_snapshots;
 use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -62,37 +62,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log::info!("Writing synthetic pool snapshots...");
 
-    // Write a few synthetic PoolSnapshot rows for demonstration
-    let snapshots = vec![
-        PoolSnapshot::new(
-            "DemoPool1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
-            "TokenMint1AAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
-            DexType::Raydium,
-            1_000_000,
-            2_000_000,
-            chrono::Utc::now().timestamp(),
-            2.0,
-        )?,
-        PoolSnapshot::with_liquidity(
-            "DemoPool2BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_string(),
-            "TokenMint2BBBBBBBBBBBBBBBBBBBBBBBBBBB".to_string(),
-            DexType::PumpSwap,
-            500_000,
-            1_000_000,
-            chrono::Utc::now().timestamp(),
-            2.0,
-            1_000_000.0,
-        )?,
-        PoolSnapshot::new(
-            "DemoPool3CCCCCCCCCCCCCCCCCCCCCCCCCCCCCC".to_string(),
-            "TokenMint3CCCCCCCCCCCCCCCCCCCCCCCCCCC".to_string(),
-            DexType::PumpFun,
-            750_000,
-            1_500_000,
-            chrono::Utc::now().timestamp(),
-            2.0,
-        )?,
-    ];
+    // Generate synthetic snapshots using shared helper
+    let snapshots = create_demo_snapshots()?;
 
     // Write each snapshot to CSV
     for (i, snapshot) in snapshots.iter().enumerate() {
