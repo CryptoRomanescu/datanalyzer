@@ -55,9 +55,9 @@ pub struct HealthDetails {
     /// WebSocket connection status
     pub websocket_connected: bool,
     /// Number of active subscriptions
-    pub active_subscriptions: usize,
+    pub active_subscriptions: u64,
     /// Number of problematic pools
-    pub problematic_pools: usize,
+    pub problematic_pools: u64,
     /// Uptime in seconds
     pub uptime_seconds: u64,
 }
@@ -77,8 +77,8 @@ pub struct ReadinessResponse {
 #[derive(Clone)]
 pub struct AppState {
     pub websocket_connected: Arc<RwLock<bool>>,
-    pub active_subscriptions: Arc<RwLock<usize>>,
-    pub problematic_pools: Arc<RwLock<usize>>,
+    pub active_subscriptions: Arc<RwLock<u64>>,
+    pub problematic_pools: Arc<RwLock<u64>>,
     pub start_time: std::time::Instant,
     pub metrics_registry: Arc<prometheus::Registry>,
 }
@@ -101,12 +101,12 @@ impl AppState {
     }
 
     /// Update active subscriptions count
-    pub async fn set_active_subscriptions(&self, count: usize) {
+    pub async fn set_active_subscriptions(&self, count: u64) {
         *self.active_subscriptions.write().await = count;
     }
 
     /// Update problematic pools count
-    pub async fn set_problematic_pools(&self, count: usize) {
+    pub async fn set_problematic_pools(&self, count: u64) {
         *self.problematic_pools.write().await = count;
     }
 }
