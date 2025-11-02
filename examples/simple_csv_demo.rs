@@ -12,6 +12,20 @@ use datanalyzer::csv_writer::CsvWriter;
 use datanalyzer::models::create_demo_snapshots;
 use std::env;
 
+/// Parse config path from command line arguments
+fn parse_config_path(args: &[String]) -> String {
+    let mut config_path = env::var("DATANALYZER_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
+    
+    for i in 0..args.len() {
+        if args[i] == "--config" && i + 1 < args.len() {
+            config_path = args[i + 1].clone();
+            break;
+        }
+    }
+    
+    config_path
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     env_logger::init();
@@ -19,12 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse command line arguments
     let args: Vec<String> = env::args().collect();
-    let mut config_path = "./config.toml".to_string();
-    
-    // Check for --config flag
-    if args.len() >= 3 && args[1] == "--config" {
-        config_path = args[2].clone();
-    }
+    let config_path = parse_config_path(&args);
     
     log::info!("Loading configuration from: {}", config_path);
 
