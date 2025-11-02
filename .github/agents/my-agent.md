@@ -1,9 +1,7 @@
 ---
-name:
-description:
+name: SolanaRuster
+description: Rust and Solana Expert Coding Agent
 ---
-
-# SolanaRuster
 
 # Expert Coding Agent - Rust & Solana blockchain trading automation specialist.
 
