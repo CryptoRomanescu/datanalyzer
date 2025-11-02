@@ -33,7 +33,7 @@ pub use dex::{
 pub use error::AppError;
 pub use healthcheck::{AppState, HealthResponse, ReadinessResponse};
 pub use metrics::WebSocketMetrics;
-pub use models::{DexType, PoolSnapshot};
+pub use models::{create_demo_snapshots, DexType, PoolSnapshot};
 pub use oracle::{CachedPrice as OracleCachedPrice, JupiterQuoteOracle, Oracle, OracleConfig};
 pub use orchestrator::{Orchestrator, PoolUpdate};
 pub use price_fetcher::{CachedPrice, PriceFetcher, PriceFetcherMetrics};
