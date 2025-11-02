@@ -13,8 +13,13 @@ use datanalyzer::orchestrator::{Orchestrator, PoolUpdate};
 use datanalyzer::token_metadata::TokenMetadataProvider;
 use datanalyzer::websocket::{AccountUpdateCallback, WebSocketManager};
 
+use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::mpsc;
+
+/// Timeout for initial RPC backfill requests (in seconds)
+const BACKFILL_RPC_TIMEOUT_SECS: u64 = 30;
 
 /// Parse config path from command line arguments
 fn parse_config_path(args: &[String]) -> String {
@@ -28,6 +33,89 @@ fn parse_config_path(args: &[String]) -> String {
     }
     
     config_path
+}
+
+/// Perform initial RPC backfill of pool accounts at startup.
+/// 
+/// Fetches all target pool accounts in one batch call and returns PoolUpdate
+/// items for non-empty accounts. Logs details for each account.
+async fn initial_backfill(rpc_url: &str, pools: &[Pubkey]) -> Vec<PoolUpdate> {
+    if pools.is_empty() {
+        log::info!("Initial backfill: no pools configured, skipping");
+        return Vec::new();
+    }
+
+    log::info!("Initial backfill: fetching {} accounts from RPC ...", pools.len());
+    
+    // Create RPC client with timeout to prevent indefinite blocking
+    let rpc_client = RpcClient::new_with_timeout(
+        rpc_url.to_string(),
+        Duration::from_secs(BACKFILL_RPC_TIMEOUT_SECS)
+    );
+    
+    // Fetch all accounts in one batch call with confirmed commitment
+    let accounts_result = rpc_client.get_multiple_accounts_with_commitment(
+        pools,
+        CommitmentConfig::confirmed(),
+    ).await;
+    
+    let mut updates = Vec::new();
+    
+    match accounts_result {
+        Ok(response) => {
+            let slot = response.context.slot;
+            
+            for (i, account_opt) in response.value.into_iter().enumerate() {
+                let pool_pubkey = pools[i];
+                
+                match account_opt {
+                    Some(account) => {
+                        let data_len = account.data.len();
+                        
+                        if data_len == 0 {
+                            log::warn!(
+                                "Backfill: account {} has empty data (slot {})",
+                                pool_pubkey,
+                                slot
+                            );
+                        } else {
+                            log::info!(
+                                "Backfill: account {} fetched: {} bytes, slot {}",
+                                pool_pubkey,
+                                data_len,
+                                slot
+                            );
+                            
+                            updates.push(PoolUpdate {
+                                pool: pool_pubkey,
+                                slot,
+                                account_data: account.data,
+                            });
+                        }
+                    }
+                    None => {
+                        log::warn!(
+                            "Backfill: account {} not found (slot {})",
+                            pool_pubkey,
+                            slot
+                        );
+                    }
+                }
+            }
+            
+            log::info!(
+                "Initial backfill complete: {} / {} accounts with data",
+                updates.len(),
+                pools.len()
+            );
+        }
+        Err(e) => {
+            log::error!("Initial backfill RPC request failed: {}", e);
+            log::warn!("Continuing startup without initial backfill data. WebSocket updates will provide data once available.");
+        }
+    }
+    
+    updates
 }
 
 /// Demo mode for Issue 1: Core runtime and CSV pipeline
@@ -179,6 +267,37 @@ async fn main() -> Result<(), Box<dyn Error>> {
         })
     };
 
+    // Build list of pool Pubkeys for initial backfill and WebSocket subscription
+    let pools: Vec<Pubkey> = runtime_cfg
+        .pools
+        .iter()
+        .map(|p| *p.pool_address())
+        .collect();
+
+    // Perform initial RPC backfill before Raydium resolver and WS listen.
+    // Note: Raydium resolver only validates addresses; it does not modify them.
+    // Pool addresses in runtime_cfg are already the correct ones to use for backfill.
+    let backfilled_updates = initial_backfill(&runtime_cfg.rpc_url, &pools).await;
+    
+    // Enqueue all backfilled updates into the orchestrator queue
+    let total_backfilled = backfilled_updates.len();
+    let mut enqueued_count = 0;
+    for update in backfilled_updates {
+        if let Err(e) = tx.send(update).await {
+            log::warn!("Failed to enqueue backfilled update: {}", e);
+        } else {
+            enqueued_count += 1;
+        }
+    }
+    
+    if total_backfilled > 0 {
+        log::info!(
+            "Enqueued {} / {} backfilled updates to orchestrator",
+            enqueued_count,
+            total_backfilled
+        );
+    }
+
     // Run discovery backfill if enabled
     if runtime_cfg.discovery.enable_pumpswap {
         log::info!("Starting PumpSwap pool discovery...");
@@ -303,12 +422,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             });
         });
 
-    // Start listening
-    let pools: Vec<Pubkey> = runtime_cfg
-        .pools
-        .iter()
-        .map(|p| *p.pool_address())
-        .collect();
+    // Start listening (pools list already built earlier for backfill)
     ws.listen(&pools, callback, 30).await?;
 
     log::info!(
