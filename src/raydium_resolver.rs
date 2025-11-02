@@ -32,7 +32,6 @@
 /// # Ok(())
 /// # }
 /// ```
-
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

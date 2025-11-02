@@ -5,7 +5,6 @@
 /// - Live subscribe to new pools via programSubscribe WebSocket
 /// - Filter pools based on quote token allowlist and liquidity thresholds
 /// - Dynamically add pools to the orchestrator without restart
-
 use crate::config::{DiscoveryConfig, PoolConfig};
 use crate::dex::pumpswap::PumpSwapDecoder;
 use crate::dex::DexDecoder;
