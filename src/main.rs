@@ -18,6 +18,9 @@ use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::mpsc;
 
+/// Timeout for initial RPC backfill requests (in seconds)
+const BACKFILL_RPC_TIMEOUT_SECS: u64 = 30;
+
 /// Parse config path from command line arguments
 fn parse_config_path(args: &[String]) -> String {
     let mut config_path = env::var("DATANALYZER_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
@@ -44,8 +47,11 @@ async fn initial_backfill(rpc_url: &str, pools: &[Pubkey]) -> Vec<PoolUpdate> {
 
     log::info!("Initial backfill: fetching {} accounts from RPC ...", pools.len());
     
-    // Create RPC client with 30-second timeout to prevent indefinite blocking
-    let rpc_client = RpcClient::new_with_timeout(rpc_url.to_string(), Duration::from_secs(30));
+    // Create RPC client with timeout to prevent indefinite blocking
+    let rpc_client = RpcClient::new_with_timeout(
+        rpc_url.to_string(),
+        Duration::from_secs(BACKFILL_RPC_TIMEOUT_SECS)
+    );
     
     // Fetch all accounts in one batch call with confirmed commitment
     let accounts_result = rpc_client.get_multiple_accounts_with_commitment(
@@ -59,7 +65,7 @@ async fn initial_backfill(rpc_url: &str, pools: &[Pubkey]) -> Vec<PoolUpdate> {
         Ok(response) => {
             let slot = response.context.slot;
             
-            for (i, account_opt) in response.value.iter().enumerate() {
+            for (i, account_opt) in response.value.into_iter().enumerate() {
                 let pool_pubkey = pools[i];
                 
                 match account_opt {
@@ -83,7 +89,7 @@ async fn initial_backfill(rpc_url: &str, pools: &[Pubkey]) -> Vec<PoolUpdate> {
                             updates.push(PoolUpdate {
                                 pool: pool_pubkey,
                                 slot,
-                                account_data: account.data.clone(),
+                                account_data: account.data,
                             });
                         }
                     }
@@ -268,7 +274,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map(|p| *p.pool_address())
         .collect();
 
-    // Perform initial RPC backfill before Raydium resolver and WS listen
+    // Perform initial RPC backfill before Raydium resolver and WS listen.
+    // Note: Raydium resolver only validates addresses; it does not modify them.
+    // Pool addresses in runtime_cfg are already the correct ones to use for backfill.
     let backfilled_updates = initial_backfill(&runtime_cfg.rpc_url, &pools).await;
     
     // Enqueue all backfilled updates into the orchestrator queue
