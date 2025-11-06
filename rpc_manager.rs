@@ -20,7 +20,7 @@ pub enum RpcHealth {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RpcTier {
     Tier0Ultra, // private/Jito/Block Engine/dedicated
-    Tier1Premium, // Helius, Triton, QuickNode/Quiknode, Alchemy
+    Tier1Premium, // Helius, Triton, QuickNode, Alchemy
     Tier2Public, // fallback/public
 }
 
@@ -886,7 +886,7 @@ impl RpcManager {
         let s = err.to_string().to_ascii_lowercase();
 
         // Common Solana RPC error patterns
-        if s.contains("blockhash not found") || s.contains("blockhash not found") {
+        if s.contains("blockhash not found") {
             RpcErrorType::BlockhashNotFound
         } else if s.contains("transaction expired")
             || s.contains("expired")
