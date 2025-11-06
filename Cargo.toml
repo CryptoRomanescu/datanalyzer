@@ -27,6 +27,22 @@ solana-program = "1.18"
 async-trait = "0.1"
 axum = "0.6"
 tracing = "0.1"
+parking_lot = "0.12"
+anyhow = "1.0"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# OpenTelemetry for observability
+opentelemetry = { version = "0.20", features = ["rt-tokio"] }
+opentelemetry_sdk = { version = "0.20", features = ["rt-tokio"] }
+# ML and statistical analysis
+ndarray = "0.15"
+# Concurrent data structures
+dashmap = "5.5"
+# Rate limiting
+governor = "0.6"
+# Hot reload configuration
+notify = "6.0"
+# Additional utilities
+tower = "0.4"
 
 [dev-dependencies]
 tokio = { version = "1.13", features = ["full", "test-util"] }
